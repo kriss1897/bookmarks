@@ -1,0 +1,49 @@
+// Event types and interfaces following SOLID principles
+import { Response } from 'express';
+
+export interface SSEEvent {
+  id: string;
+  type: string;
+  data: any;
+  timestamp: string;
+  namespace?: string; // Optional namespace for targeted events
+}
+
+export interface SSEConnection {
+  id: string;
+  response: Response;
+  clientId: number;
+  namespace: string; // Namespace this connection is subscribed to
+}
+
+export interface EventData {
+  type: string;
+  message: string;
+  timestamp: string;
+  data?: any;
+}
+
+// Event types enum for better type safety
+export enum EventType {
+  CONNECTION = 'connection',
+  TRIGGER = 'trigger',
+  HEARTBEAT = 'heartbeat',
+  NOTIFICATION = 'notification'
+}
+
+// Interface for event publishers (Open/Closed Principle)
+export interface IEventPublisher {
+  publishEvent(eventType: EventType, data: any): void;
+}
+
+// Interface for SSE manager (Dependency Inversion Principle)
+export interface ISSEManager {
+  addConnection(connection: SSEConnection): void;
+  removeConnection(clientId: number): void;
+  broadcastEvent(event: SSEEvent): void;
+  broadcastToNamespace(namespace: string, event: SSEEvent): void;
+  getConnectionCount(): number;
+  getConnectionCountByNamespace(namespace: string): number;
+  forceCleanup(): void;
+  forceCleanupNamespace(namespace: string): void;
+}
