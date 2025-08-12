@@ -1,10 +1,11 @@
-import { SSEProvider } from './contexts/SSEContext';
-import { DragDropProvider } from './contexts/DragDropContext';
-import { NamespaceSelector } from './components/NamespaceSelector';
-import { SSEControls } from './components/SSEControls';
-import { EventsList } from './components/EventsList';
-import { DragDropDemo } from './components/DragDropDemo';
-import { useSSE } from './hooks/useSSE';
+import { SSEProvider } from './contexts/SSEContext'
+import { DragDropProvider } from './contexts/DragDropContext'
+import { NamespaceSelector } from './components/NamespaceSelector'
+import { SSEControls } from './components/SSEControls'
+import { EventsList } from './components/EventsList'
+import { DragDropDemo } from './components/DragDropDemo'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import { useSSE } from './hooks/useSSE'
 
 function AppContent() {
   const { namespace } = useSSE();
@@ -36,13 +37,15 @@ function AppContent() {
 }
 
 function App() {
-  return (
-    <SSEProvider>
-      <DragDropProvider>
-        <AppContent />
-      </DragDropProvider>
-    </SSEProvider>
-  );
+	return (
+		<ErrorBoundary>
+			<SSEProvider>
+				<DragDropProvider>
+					<AppContent />
+				</DragDropProvider>
+			</SSEProvider>
+		</ErrorBoundary>
+	)
 }
 
 export default App;
