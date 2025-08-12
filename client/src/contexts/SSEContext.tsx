@@ -1,6 +1,6 @@
 import { createContext, useEffect, useState, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { TabCoordinator } from '../services/TabCoordinator';
+import { usePersistedState } from '../hooks/usePersistedState';
 
 interface SSEMessage {
   type: string;
@@ -33,263 +33,199 @@ interface SSEProviderProps {
 }
 
 export function SSEProvider({ children }: SSEProviderProps) {
+  // Use persisted state for namespace (localStorage - shared across tabs)
+  const [namespace, setNamespace] = usePersistedState('sse-namespace', '');
+  
+  // Use regular state for messages - will implement custom persistence logic
   const [sseMessages, setSseMessages] = useState<SSEMessage[]>([]);
+  
+  // Regular state for transient data
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [connectionCount, setConnectionCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [reconnectAttempt, setReconnectAttempt] = useState<number>(0);
-  const [isCleanupReconnect, setIsCleanupReconnect] = useState<boolean>(false);
-  const [namespace, setNamespace] = useState<string>('');
-  const [isTabLeader, setIsTabLeader] = useState<boolean>(false);
+
+  // Load persisted messages on mount
+  useEffect(() => {
+    const loadPersistedMessages = () => {
+      try {
+        const stored = sessionStorage.getItem('sse-messages');
+        if (stored) {
+          const parsed = JSON.parse(stored) as SSEMessage[];
+          // Filter messages by TTL (2 hours)
+          const now = Date.now();
+          const validMessages = parsed.filter((msg) => {
+            const msgTime = new Date(msg.timestamp).getTime();
+            return now - msgTime < 2 * 60 * 60 * 1000; // 2 hours
+          });
+          setSseMessages(validMessages);
+        }
+      } catch (error) {
+        console.warn('Error loading persisted messages:', error);
+      }
+    };
+    
+    loadPersistedMessages();
+  }, []);
+
+  // Persist messages when they change
+  useEffect(() => {
+    try {
+      // Only persist last 20 messages
+      const messagesToPersist = sseMessages.slice(-20);
+      sessionStorage.setItem('sse-messages', JSON.stringify(messagesToPersist));
+    } catch (error) {
+      console.warn('Error persisting messages:', error);
+    }
+  }, [sseMessages]);
   
-  // Tab coordinator for managing tab leadership
-  const tabCoordinatorRef = useRef<TabCoordinator | null>(null);
+  // Shared Worker management
+  const sharedWorkerRef = useRef<SharedWorker | null>(null);
+  const portRef = useRef<MessagePort | null>(null);
 
   // API functions for triggering events
   const fetchConnectionCount = useCallback(async () => {
-    try {
-      const url = namespace ? `/api/connections?namespace=${encodeURIComponent(namespace)}` : '/api/connections';
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        setConnectionCount(data.connections);
-      }
-    } catch (error) {
-      console.error('Error fetching connection count:', error);
-    }
-  }, [namespace]);
+    // Connection count is now handled by the shared worker
+    // We'll receive updates via worker messages
+  }, []);
 
-  // Initialize tab coordinator when namespace changes
+  // Handle messages from shared worker
+  const handleWorkerMessage = useCallback((message: { type: string; namespace?: string; data?: unknown }) => {
+    console.log('Received worker message:', message);
+    
+    switch (message.type) {
+      case 'connected':
+        setConnectionStatus('connected');
+        console.log(`Connected to namespace: ${message.namespace}`);
+        break;
+        
+      case 'disconnected':
+        setConnectionStatus('disconnected');
+        console.log(`Disconnected from namespace: ${message.namespace}`);
+        break;
+        
+      case 'error':
+        console.error('Worker error:', message.data);
+        setSseMessages(prev => [...prev.slice(-9), {
+          type: 'error',
+          message: (message.data as { message?: string })?.message || 'Unknown error',
+          timestamp: new Date().toISOString(),
+          id: Date.now().toString()
+        }]);
+        break;
+        
+      case 'event': {
+        // Handle SSE events broadcasted from shared worker
+        const eventData = message.data as SSEMessage;
+        setSseMessages(prev => [...prev.slice(-9), {
+          ...eventData,
+          id: eventData.id || Date.now().toString()
+        }]);
+        break;
+      }
+        
+      case 'connection-count':
+        setConnectionCount((message.data as { connections: number }).connections);
+        break;
+        
+      default:
+        console.warn('Unknown worker message type:', message.type);
+    }
+  }, [setSseMessages]);
+
+  // Initialize shared worker and handle namespace changes
   useEffect(() => {
     if (!namespace.trim()) {
       // Cleanup if no namespace
-      if (tabCoordinatorRef.current) {
-        tabCoordinatorRef.current.cleanup();
-        tabCoordinatorRef.current = null;
+      if (portRef.current && sharedWorkerRef.current) {
+        portRef.current.postMessage({
+          type: 'disconnect',
+          namespace: namespace
+        });
       }
-      setIsTabLeader(false);
-      return;
-    }
-
-    // Initialize tab coordinator
-    if (!tabCoordinatorRef.current) {
-      tabCoordinatorRef.current = new TabCoordinator();
-    }
-
-    const coordinator = tabCoordinatorRef.current;
-    
-    // Initialize namespace and check leadership
-    const isLeader = coordinator.initializeNamespace(namespace);
-    setIsTabLeader(isLeader);
-
-    // Setup callbacks
-    coordinator.onLeaderChange(namespace, (leader: boolean) => {
-      console.log(`Tab leadership changed for namespace ${namespace}: ${leader ? 'leader' : 'follower'}`);
-      setIsTabLeader(leader);
-    });
-
-    coordinator.onEvent(namespace, (event: unknown) => {
-      console.log('Received SSE event from leader tab:', event);
-      // Handle events received from leader tab
-      if (event && typeof event === 'object' && 'type' in event) {
-        setSseMessages(prev => [...prev.slice(-9), { ...event as SSEMessage, id: Date.now().toString() }]);
-      }
-    });
-
-    // Cleanup on unmount or namespace change
-    return () => {
-      if (coordinator) {
-        coordinator.cleanup(namespace);
-      }
-    };
-  }, [namespace]);
-
-  // SSE connection effect with reconnection logic - only for leader tabs
-  useEffect(() => {
-    // Only leader tabs should maintain SSE connections
-    if (!isTabLeader || !namespace.trim()) {
-      console.log(`Not creating SSE connection - isTabLeader: ${isTabLeader}, namespace: "${namespace}"`);
       setConnectionStatus('disconnected');
       return;
     }
 
-    let currentEventSource: EventSource | null = null;
-    let reconnectTimeout: NodeJS.Timeout | null = null;
+    // Initialize shared worker if not already done
+    if (!sharedWorkerRef.current) {
+      try {
+        console.log('Initializing Shared Worker...');
+        const worker = new SharedWorker('/sse-shared-worker.js');
+        sharedWorkerRef.current = worker;
+        
+        const port = worker.port;
+        portRef.current = port;
+        
+        // Set up message handling
+        port.onmessage = (event) => {
+          handleWorkerMessage(event.data);
+        };
+        
+        port.onmessageerror = (error) => {
+          console.error('Worker message error:', error);
+          setConnectionStatus('disconnected');
+        };
+        
+        port.start();
+        console.log('Shared Worker initialized');
+        
+      } catch (error) {
+        console.error('Failed to initialize Shared Worker:', error);
+        setConnectionStatus('disconnected');
+        return;
+      }
+    }
 
-    const createSSEConnection = () => {
-      console.log(`Creating SSE connection for namespace: ${namespace} (leader tab)...`);
+    // Connect to the namespace via shared worker
+    if (portRef.current) {
+      console.log(`Connecting to namespace: ${namespace}`);
       setConnectionStatus('connecting');
       
-      const es = new EventSource(`/api/events?namespace=${encodeURIComponent(namespace)}`);
-      currentEventSource = es;
-      
-      es.onopen = () => {
-        console.log('SSE connection opened (leader tab)');
-        setConnectionStatus('connected');
-        setReconnectAttempt(0); // Reset reconnect attempts on successful connection
-        setIsCleanupReconnect(false); // Reset cleanup flag on successful connection
-        fetchConnectionCount(); // Get initial connection count
-      };
-      
-      // Handle different event types
-      es.addEventListener('connection', (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Connection event:', data);
-          const message = { ...data, id: Date.now().toString() };
-          setSseMessages(prev => [...prev.slice(-9), message]);
-          
-          // Broadcast to other tabs
-          if (tabCoordinatorRef.current) {
-            tabCoordinatorRef.current.broadcastEvent(namespace, message);
-          }
-          
-          fetchConnectionCount();
-          
-          // Handle cleanup events - prepare for graceful reconnection
-          if (data.type === 'cleanup' || data.type === 'forced_cleanup') {
-            console.log('Server cleanup event received, preparing for reconnection...');
-            setIsCleanupReconnect(true);
-          }
-        } catch (error) {
-          console.error('Error parsing connection event:', error);
-        }
+      portRef.current.postMessage({
+        type: 'connect',
+        namespace: namespace
       });
+    }
 
-      es.addEventListener('trigger', (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Trigger event:', data);
-          const message = { ...data, id: Date.now().toString() };
-          setSseMessages(prev => [...prev.slice(-9), message]);
-          
-          // Broadcast to other tabs
-          if (tabCoordinatorRef.current) {
-            tabCoordinatorRef.current.broadcastEvent(namespace, message);
-          }
-        } catch (error) {
-          console.error('Error parsing trigger event:', error);
-        }
-      });
-
-      es.addEventListener('notification', (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Notification event:', data);
-          const message = { ...data, id: Date.now().toString() };
-          setSseMessages(prev => [...prev.slice(-9), message]);
-          
-          // Broadcast to other tabs
-          if (tabCoordinatorRef.current) {
-            tabCoordinatorRef.current.broadcastEvent(namespace, message);
-          }
-        } catch (error) {
-          console.error('Error parsing notification event:', error);
-        }
-      });
-
-      es.addEventListener('heartbeat', (event) => {
-        try {
-          JSON.parse(event.data); // Parse to validate JSON but don't store
-          console.log('Heartbeat event received (leader tab)');
-          // Don't add heartbeats to visible messages to reduce noise
-        } catch (error) {
-          console.error('Error parsing heartbeat event:', error);
-        }
-      });
-
-      es.addEventListener('close', (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Close event received:', data);
-          if (data.type === 'connection_closing') {
-            console.log('Server is closing connection gracefully');
-            setIsCleanupReconnect(true);
-          }
-        } catch (error) {
-          console.error('Error parsing close event:', error);
-        }
-      });
-      
-      es.onerror = (error) => {
-        console.error('SSE connection error:', error);
-        setConnectionStatus('disconnected');
-        es.close();
-        
-        // Implement exponential backoff for reconnection
-        const maxReconnectAttempts = 10;
-        let baseDelay = 1000; // 1 second for normal errors
-        
-        // Use longer initial delay for cleanup-related disconnections
-        if (isCleanupReconnect) {
-          baseDelay = 3000; // 3 seconds for cleanup reconnections
-          console.log('Cleanup-related disconnection detected, using longer initial delay');
-        }
-        
-        if (reconnectAttempt < maxReconnectAttempts) {
-          const delay = Math.min(baseDelay * Math.pow(2, reconnectAttempt), 30000); // Max 30 seconds
-          console.log(`Attempting to reconnect in ${delay}ms (attempt ${reconnectAttempt + 1}/${maxReconnectAttempts})`);
-          
-          reconnectTimeout = setTimeout(() => {
-            setReconnectAttempt(prev => prev + 1);
-            createSSEConnection();
-          }, delay);
-        } else {
-          console.error('Max reconnection attempts reached. Please refresh the page.');
-          setSseMessages(prev => [...prev, {
-            type: 'error',
-            message: 'Connection lost. Please refresh the page.',
-            timestamp: new Date().toISOString(),
-            id: Date.now().toString()
-          }]);
-        }
-      };
-    };
-
-    // Start initial connection
-    createSSEConnection();
-    
-    // Cleanup on component unmount
+    // Cleanup function
     return () => {
-      console.log('Cleaning up SSE connection (leader tab)');
-      if (currentEventSource) {
-        currentEventSource.close();
+      if (portRef.current) {
+        portRef.current.postMessage({
+          type: 'disconnect',
+          namespace: namespace
+        });
       }
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
-      }
-      setConnectionStatus('disconnected');
     };
-  }, [reconnectAttempt, isCleanupReconnect, namespace, fetchConnectionCount, isTabLeader]);
+  }, [namespace, handleWorkerMessage]);
 
-  // API functions for triggering events
+  // API functions for triggering events via shared worker
   const triggerCustomEvent = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('/api/trigger', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: 'Custom event triggered from client!',
-          namespace: namespace || undefined, // Send namespace if set
+      if (portRef.current) {
+        portRef.current.postMessage({
+          type: 'trigger',
           data: {
-            triggeredAt: new Date().toISOString(),
-            source: 'bookmarks-client',
-            namespace: namespace
+            message: 'Custom event triggered from client!',
+            namespace: namespace || undefined,
+            data: {
+              triggeredAt: new Date().toISOString(),
+              source: 'bookmarks-client',
+              namespace: namespace
+            }
           }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        });
+      } else {
+        throw new Error('Shared worker not available');
       }
-
-      const result = await response.json();
-      console.log('Trigger response:', result);
     } catch (error) {
       console.error('Error triggering event:', error);
+      setSseMessages(prev => [...prev.slice(-9), {
+        type: 'error',
+        message: 'Failed to trigger event',
+        timestamp: new Date().toISOString(),
+        id: Date.now().toString()
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -307,27 +243,27 @@ export function SSEProvider({ children }: SSEProviderProps) {
 
       const notification = notifications[type];
       
-      const response = await fetch('/api/notify', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: notification.title,
-          body: notification.body,
-          type,
-          namespace: namespace || undefined // Send namespace if set
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (portRef.current) {
+        portRef.current.postMessage({
+          type: 'notify',
+          data: {
+            title: notification.title,
+            body: notification.body,
+            type,
+            namespace: namespace || undefined
+          }
+        });
+      } else {
+        throw new Error('Shared worker not available');
       }
-
-      const result = await response.json();
-      console.log('Notification response:', result);
     } catch (error) {
       console.error('Error sending notification:', error);
+      setSseMessages(prev => [...prev.slice(-9), {
+        type: 'error',
+        message: 'Failed to send notification',
+        timestamp: new Date().toISOString(),
+        id: Date.now().toString()
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -336,6 +272,18 @@ export function SSEProvider({ children }: SSEProviderProps) {
   const clearMessages = () => {
     setSseMessages([]);
   };
+
+  // Cleanup shared worker on unmount
+  useEffect(() => {
+    return () => {
+      if (portRef.current && namespace) {
+        portRef.current.postMessage({
+          type: 'disconnect',
+          namespace: namespace
+        });
+      }
+    };
+  }, [namespace]);
 
   const value: SSEContextType = {
     sseMessages,
