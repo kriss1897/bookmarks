@@ -15,6 +15,7 @@ interface LocalDBBookmark {
   parentId?: string;
   isFavorite: boolean;
   namespace: string;
+  orderIndex: string;
   isTemporary: boolean;
   createdAt: number;
   updatedAt: number;
@@ -26,6 +27,7 @@ interface LocalDBFolder {
   parentId?: string;
   isOpen: boolean;
   namespace: string;
+  orderIndex: string;
   isTemporary: boolean;
   createdAt: number;
   updatedAt: number;
@@ -34,7 +36,7 @@ interface LocalDBFolder {
 export class LocalDataService {
   // Get all bookmarks for a namespace
   async getBookmarks(namespace: string): Promise<LocalBookmarkItem[]> {
-    const items = await offlineWorkerService.getNamespaceItems(namespace) as (LocalDBBookmark | LocalDBFolder)[];
+  const items = await offlineWorkerService.getNamespaceItems(namespace) as (LocalDBBookmark | LocalDBFolder)[];
     
     // Convert to BookmarkItem format
     const bookmarkItems: LocalBookmarkItem[] = items.map((item: LocalDBBookmark | LocalDBFolder) => {
@@ -47,8 +49,7 @@ export class LocalDataService {
           type: 'bookmark' as const,
           namespace: bookmark.namespace,
           parentId: bookmark.parentId || null,
-          prevSiblingId: null, // Will be calculated if needed
-          nextSiblingId: null, // Will be calculated if needed
+          orderIndex: bookmark.orderIndex,
           createdAt: bookmark.createdAt,
           updatedAt: bookmark.updatedAt,
           title: bookmark.name, // LocalBookmark uses 'name', UI expects 'title'
@@ -63,8 +64,7 @@ export class LocalDataService {
           type: 'folder' as const,
           namespace: folder.namespace,
           parentId: folder.parentId || null,
-          prevSiblingId: null, // Will be calculated if needed
-          nextSiblingId: null, // Will be calculated if needed
+          orderIndex: folder.orderIndex,
           createdAt: folder.createdAt,
           updatedAt: folder.updatedAt,
           name: folder.name, // Folders use 'name' in both local and UI
@@ -122,7 +122,15 @@ export class LocalDataService {
         }
       }
     }
+    // Sort children by orderIndex for each folder
+    for (const [, node] of itemMap) {
+      if (node.type === 'folder' && node.children && node.children.length > 1) {
+        node.children.sort((a, b) => (a.orderIndex || '').localeCompare(b.orderIndex || ''));
+      }
+    }
 
+    // Sort roots as well
+    rootItems.sort((a, b) => (a.orderIndex || '').localeCompare(b.orderIndex || ''));
     return rootItems;
   }
 }

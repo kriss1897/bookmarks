@@ -40,20 +40,18 @@ async function createDatabase(dbPath: string): Promise<void> {
   sqlite.pragma('foreign_keys = ON');
   sqlite.pragma('journal_mode = WAL');
 
-  // Create tables with UUID schema
+  // Create tables with UUID schema (orderIndex-based ordering)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS nodes (
       id TEXT PRIMARY KEY,
       namespace TEXT NOT NULL,
       type TEXT NOT NULL CHECK (type IN ('folder', 'bookmark')),
       parent_id TEXT,
-      prev_sibling_id TEXT,
-      next_sibling_id TEXT,
+      order_index TEXT NOT NULL DEFAULT 'a0',
       created_at INTEGER NOT NULL DEFAULT (unixepoch()),
       updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
       FOREIGN KEY (parent_id) REFERENCES nodes(id) ON DELETE CASCADE,
-      FOREIGN KEY (prev_sibling_id) REFERENCES nodes(id) ON DELETE SET NULL,
-      FOREIGN KEY (next_sibling_id) REFERENCES nodes(id) ON DELETE SET NULL
+      CHECK (length(order_index) > 0)
     );
 
     CREATE TABLE IF NOT EXISTS folder (
@@ -81,9 +79,8 @@ async function createDatabase(dbPath: string): Promise<void> {
     );
 
     -- Performance indexes
-    CREATE INDEX IF NOT EXISTS idx_nodes_namespace_parent ON nodes(namespace, parent_id);
-    CREATE INDEX IF NOT EXISTS idx_nodes_namespace_parent_prev ON nodes(namespace, parent_id, prev_sibling_id);
-    CREATE INDEX IF NOT EXISTS idx_nodes_namespace_parent_next ON nodes(namespace, parent_id, next_sibling_id);
+  CREATE INDEX IF NOT EXISTS idx_nodes_namespace_parent ON nodes(namespace, parent_id);
+  CREATE INDEX IF NOT EXISTS idx_nodes_namespace_parent_order ON nodes(namespace, parent_id, order_index);
     CREATE INDEX IF NOT EXISTS idx_bookmarks_url ON bookmarks(url);
     CREATE INDEX IF NOT EXISTS idx_nodes_namespace ON nodes(namespace);
     CREATE INDEX IF NOT EXISTS idx_folder_state_namespace ON folder_state(namespace);

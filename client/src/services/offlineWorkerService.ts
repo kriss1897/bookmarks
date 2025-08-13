@@ -195,6 +195,7 @@ export class OfflineWorkerService {
       url: string;
       parentId?: string;
       isFavorite?: boolean;
+      orderIndex: string;
     }
   ): Operation {
     return {
@@ -208,6 +209,7 @@ export class OfflineWorkerService {
         url: payload.url,
         parentId: payload.parentId,
         isFavorite: payload.isFavorite,
+        orderIndex: payload.orderIndex,
       },
       clientCreatedAt: Date.now(),
       status: "pending",
@@ -219,6 +221,7 @@ export class OfflineWorkerService {
     payload: {
       name: string;
       parentId?: string;
+      orderIndex: string;
     }
   ): Operation {
     return {
@@ -230,6 +233,7 @@ export class OfflineWorkerService {
         id: generateUUID(),
         name: payload.name,
         parentId: payload.parentId,
+        orderIndex: payload.orderIndex,
       },
       clientCreatedAt: Date.now(),
       status: "pending",
@@ -292,7 +296,7 @@ export class OfflineWorkerService {
     payload: {
       id: string;
       newParentId?: string;
-      afterId?: string;
+  targetOrderIndex: string;
     }
   ): Operation {
     return {

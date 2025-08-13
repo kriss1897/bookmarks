@@ -34,11 +34,11 @@ export class BookmarkController {
     }
   };
 
-  // Create a new folder
+  // Create a new folder (client must supply orderIndex)
   createFolder = async (req: Request, res: Response): Promise<void> => {
     try {
       const { namespace } = req.params;
-      const { name, parentId } = req.body;
+      const { name, parentId, orderIndex } = req.body;
 
       console.log('Creating folder request:', { namespace, name, parentId });
 
@@ -50,17 +50,29 @@ export class BookmarkController {
         return;
       }
 
+      if (!orderIndex || typeof orderIndex !== 'string') {
+        res.status(400).json({ success: false, error: 'orderIndex is required' });
+        return;
+      }
+
       const folder = await this.bookmarkService.createFolder(
-        namespace, 
-        name, 
-        parentId || undefined
+        namespace,
+        name,
+        parentId || null,
+        orderIndex
       );
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
-        type: 'folder_created',
-        data: folder,
-        timestamp: new Date().toISOString(),
+  type: 'folder_created',
+  id: folder.id,
+  name: folder.name,
+  parentId: folder.parentId,
+  orderIndex: folder.orderIndex,
+  isOpen: folder.open,
+  createdAt: folder.createdAt,
+  updatedAt: folder.updatedAt,
+  timestamp: new Date().toISOString(),
       });
 
       res.status(201).json({ success: true, data: folder });
@@ -74,11 +86,11 @@ export class BookmarkController {
     }
   };
 
-  // Create a new bookmark
+  // Create a new bookmark (client must supply orderIndex)
   createBookmark = async (req: Request, res: Response): Promise<void> => {
     try {
       const { namespace } = req.params;
-      const { title, url, icon, parentId } = req.body;
+      const { title, url, icon, parentId, orderIndex } = req.body;
 
       if (!title || !url || typeof title !== 'string' || typeof url !== 'string') {
         res.status(400).json({ 
@@ -88,19 +100,32 @@ export class BookmarkController {
         return;
       }
 
+      if (!orderIndex || typeof orderIndex !== 'string') {
+        res.status(400).json({ success: false, error: 'orderIndex is required' });
+        return;
+      }
+
       const bookmark = await this.bookmarkService.createBookmark(
-        namespace, 
-        title, 
-        url, 
-        icon, 
-        parentId || undefined
+        namespace,
+        title,
+        url,
+        icon,
+        parentId || null,
+        orderIndex
       );
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
-        type: 'bookmark_created',
-        data: bookmark,
-        timestamp: new Date().toISOString(),
+  type: 'bookmark_created',
+  id: bookmark.id,
+  name: bookmark.title,
+  url: bookmark.url,
+  parentId: bookmark.parentId,
+  orderIndex: bookmark.orderIndex,
+  isFavorite: bookmark.favorite,
+  createdAt: bookmark.createdAt,
+  updatedAt: bookmark.updatedAt,
+  timestamp: new Date().toISOString(),
       });
 
       res.status(201).json({ success: true, data: bookmark });
@@ -113,26 +138,25 @@ export class BookmarkController {
     }
   };
 
-  // Move an item (reorder or change parent)
+  // Move an item (reorder or change parent). Client must supply targetOrderIndex
   moveItem = async (req: Request, res: Response): Promise<void> => {
     try {
       const { namespace, itemId } = req.params;
-      const { newParentId, afterItemId } = req.body;
+      const { newParentId, targetOrderIndex } = req.body;
 
-      await this.bookmarkService.moveItem(
-        itemId, 
-        newParentId || null, 
-        afterItemId || undefined
-      );
+      if (!targetOrderIndex || typeof targetOrderIndex !== 'string') {
+        res.status(400).json({ success: false, error: 'targetOrderIndex is required' });
+        return;
+      }
+
+      await this.bookmarkService.moveItem(itemId, newParentId || null, targetOrderIndex);
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
         type: 'item_moved',
-        data: { 
-          itemId: itemId, 
-          newParentId: newParentId || null, 
-          afterItemId: afterItemId || null 
-        },
+        id: itemId,
+        newParentId: newParentId || null,
+        targetOrderIndex,
         timestamp: new Date().toISOString(),
       });
 
@@ -159,10 +183,8 @@ export class BookmarkController {
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
         type: 'folder_toggled',
-        data: { 
-          folderId: folderId, 
-          open: newState 
-        },
+        id: folderId,
+        isOpen: newState,
         timestamp: new Date().toISOString(),
       });
 
@@ -188,10 +210,8 @@ export class BookmarkController {
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
         type: 'bookmark_favorite_toggled',
-        data: { 
-          bookmarkId: bookmarkId, 
-          favorite: newState 
-        },
+        id: bookmarkId,
+        isFavorite: newState,
         timestamp: new Date().toISOString(),
       });
 
@@ -215,7 +235,7 @@ export class BookmarkController {
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
         type: 'item_deleted',
-        data: { itemId: itemId },
+        id: itemId,
         timestamp: new Date().toISOString(),
       });
 

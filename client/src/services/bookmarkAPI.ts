@@ -4,8 +4,7 @@ export interface BookmarkItem {
   type: 'folder' | 'bookmark';
   namespace: string;
   parentId: string | null;
-  prevSiblingId: string | null;
-  nextSiblingId: string | null;
+  orderIndex: string;
   createdAt: number;
   updatedAt: number;
   // Folder-specific fields
@@ -21,6 +20,7 @@ export interface BookmarkItem {
 export interface CreateFolderRequest {
   name: string;
   parentId?: string;
+  orderIndex: string;
 }
 
 export interface CreateBookmarkRequest {
@@ -28,11 +28,12 @@ export interface CreateBookmarkRequest {
   url: string;
   icon?: string;
   parentId?: string;
+  orderIndex: string;
 }
 
 export interface MoveItemRequest {
   newParentId?: string;
-  afterItemId?: string;
+  targetOrderIndex: string;
 }
 
 // Import offline services
@@ -95,7 +96,8 @@ export class BookmarkAPI {
   async createFolder(namespace: string, request: CreateFolderRequest): Promise<LocalBookmarkItem> {
     const operation = offlineWorkerService.createFolderOperation(namespace, {
       name: request.name,
-      parentId: request.parentId
+  parentId: request.parentId,
+  orderIndex: request.orderIndex
     });
 
     await offlineWorkerService.enqueueOperation(namespace, operation);
@@ -109,8 +111,7 @@ export class BookmarkAPI {
       type: 'folder' as const,
       namespace,
       parentId: request.parentId || null,
-      prevSiblingId: null,
-      nextSiblingId: null,
+  orderIndex: request.orderIndex,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       name: request.name,
@@ -124,7 +125,8 @@ export class BookmarkAPI {
       name: request.title,
       url: request.url,
       parentId: request.parentId,
-      isFavorite: false
+  isFavorite: false,
+  orderIndex: request.orderIndex
     });
 
     await offlineWorkerService.enqueueOperation(namespace, operation);
@@ -138,8 +140,7 @@ export class BookmarkAPI {
       type: 'bookmark' as const,
       namespace,
       parentId: request.parentId || null,
-      prevSiblingId: null,
-      nextSiblingId: null,
+  orderIndex: request.orderIndex,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       title: request.title,
@@ -190,11 +191,11 @@ export class BookmarkAPI {
   }
 
   // Move item
-  async moveItem(namespace: string, itemId: string | string, newParentId?: string, afterId?: string): Promise<void> {
+  async moveItem(namespace: string, itemId: string | string, newParentId: string | undefined, targetOrderIndex: string): Promise<void> {
     const operation = offlineWorkerService.moveItemOperation(namespace, {
       id: itemId,
       newParentId,
-      afterId
+      targetOrderIndex
     });
 
     await offlineWorkerService.enqueueOperation(namespace, operation);

@@ -18,6 +18,7 @@ interface StoredBookmark {
   parentId?: string;
   isFavorite: boolean;
   namespace: string;
+  orderIndex: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -28,6 +29,7 @@ interface StoredFolder {
   parentId?: string;
   isOpen: boolean;
   namespace: string;
+  orderIndex: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -37,8 +39,7 @@ interface ServerItem {
   type: 'bookmark' | 'folder';
   namespace: string;
   parentId?: string | null;
-  prevSiblingId?: string | null;
-  nextSiblingId?: string | null;
+  orderIndex?: string | null;
   createdAt: number;
   updatedAt: number;
   title?: string;
@@ -333,7 +334,11 @@ class SSESharedWorkerImpl implements WorkerAPI {
       this.getAllFromStore(foldersStore, 'namespace', namespace) as Promise<StoredFolder[]>
     ]);
     
-    return [...bookmarks, ...folders].sort((a, b) => a.createdAt - b.createdAt);
+    return [...bookmarks, ...folders].sort((a, b) => {
+      const aIdx = (a as StoredBookmark | StoredFolder).orderIndex || '';
+      const bIdx = (b as StoredBookmark | StoredFolder).orderIndex || '';
+      return aIdx.localeCompare(bIdx);
+    });
   }
 
   async applyOperationOptimistically(operation: Operation): Promise<void> {
@@ -355,6 +360,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
             parentId: payload.parentId,
             isFavorite: payload.isFavorite || false,
             namespace: operation.namespace,
+            orderIndex: payload.orderIndex,
             createdAt: now,
             updatedAt: now
           };
@@ -370,6 +376,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
             parentId: payload.parentId,
             isOpen: false,
             namespace: operation.namespace,
+            orderIndex: payload.orderIndex,
             createdAt: now,
             updatedAt: now
           };
@@ -437,6 +444,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
             await this.putInStore(bookmarksStore, {
               ...bookmark,
               parentId: payload.newParentId,
+              orderIndex: (payload as MoveItemPayload).targetOrderIndex,
               updatedAt: now
             });
           }
@@ -445,6 +453,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
             await this.putInStore(foldersStore, {
               ...folder,
               parentId: payload.newParentId,
+              orderIndex: (payload as MoveItemPayload).targetOrderIndex,
               updatedAt: now
             });
           }
@@ -472,8 +481,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
         type: 'bookmark',
         namespace: bookmark.namespace,
         parentId: bookmark.parentId || null,
-        prevSiblingId: null,
-        nextSiblingId: null,
+  orderIndex: (bookmark as StoredBookmark).orderIndex,
         createdAt: bookmark.createdAt,
         updatedAt: bookmark.updatedAt,
         title: bookmark.name,
@@ -488,8 +496,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
         type: 'folder',
         namespace: folder.namespace,
         parentId: folder.parentId || null,
-        prevSiblingId: null,
-        nextSiblingId: null,
+  orderIndex: (folder as StoredFolder).orderIndex,
         createdAt: folder.createdAt,
         updatedAt: folder.updatedAt,
         name: folder.name,
@@ -530,8 +537,8 @@ class SSESharedWorkerImpl implements WorkerAPI {
 
     // Add server items
     const now = Date.now();
-    for (const item of serverItems) {
-      if (item.type === 'bookmark') {
+  for (const item of serverItems) {
+  if (item.type === 'bookmark') {
         const bookmark: StoredBookmark = {
           id: item.id,
           name: item.title || '',
@@ -539,6 +546,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
           parentId: item.parentId || undefined,
           isFavorite: item.favorite || false,
           namespace,
+      orderIndex: item.orderIndex || '',
           createdAt: now,
           updatedAt: now
         };
@@ -550,6 +558,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
           parentId: item.parentId || undefined,
           isOpen: item.open || false,
           namespace,
+      orderIndex: item.orderIndex || '',
           createdAt: now,
           updatedAt: now
         };
@@ -593,8 +602,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
           type: item.type,
           namespace: item.namespace,
           parentId: item.parentId,
-          prevSiblingId: item.prevSiblingId,
-          nextSiblingId: item.nextSiblingId,
+          orderIndex: item.orderIndex,
           createdAt: item.createdAt || Date.now(),
           updatedAt: item.updatedAt || Date.now(),
           ...(item.type === 'bookmark' ? {
@@ -931,12 +939,17 @@ class SSESharedWorkerImpl implements WorkerAPI {
       const bookmarksStore = transaction.objectStore('bookmarks');
       const foldersStore = transaction.objectStore('folders');
       const now = Date.now();
+      // Normalize payload: server may nest actual payload under `data`
+      const baseObj = (data && typeof data === 'object') ? (data as Record<string, unknown>) : {} as Record<string, unknown>;
+      const payload = (('data' in baseObj) && typeof baseObj['data'] === 'object' && baseObj['data'] !== null)
+        ? (baseObj['data'] as Record<string, unknown>)
+        : baseObj;
       
       switch (eventType) {
         case 'item_deleted':
         case 'folder_deleted':
         case 'bookmark_deleted': {
-          const itemId = data.id as string;
+          const itemId = (payload['id'] as string) || (payload['itemId'] as string);
           if (itemId) {
             console.log(`Deleting item ${itemId} from local state due to server event`);
             
@@ -959,18 +972,20 @@ class SSESharedWorkerImpl implements WorkerAPI {
         }
         
         case 'folder_created': {
-          const folderId = data.id as string;
-          const folderName = data.name as string;
+      const folderId = payload['id'] as string;
+      const folderName = payload['name'] as string;
+      const orderIdx = (payload['orderIndex'] as string) || (payload['targetOrderIndex'] as string) || '';
           if (folderId && folderName) {
             console.log(`Adding folder ${folderId} to local state due to server event`);
             const folder: StoredFolder = {
               id: folderId,
               name: folderName,
-              parentId: data.parentId as string | undefined,
-              isOpen: (data.isOpen as boolean) || false,
+        parentId: payload['parentId'] as string | undefined,
+        isOpen: (payload['isOpen'] as boolean) || false,
               namespace,
-              createdAt: (data.createdAt as number) || now,
-              updatedAt: (data.updatedAt as number) || now
+        orderIndex: orderIdx,
+        createdAt: (payload['createdAt'] as number) || now,
+        updatedAt: (payload['updatedAt'] as number) || now
             };
             await this.putInStore(foldersStore, folder);
             this.emit('dataChanged', { namespace, type: 'serverUpdate' });
@@ -979,20 +994,22 @@ class SSESharedWorkerImpl implements WorkerAPI {
         }
         
         case 'bookmark_created': {
-          const bookmarkId = data.id as string;
-          const bookmarkName = data.name as string;
-          const bookmarkUrl = data.url as string;
+      const bookmarkId = payload['id'] as string;
+      const bookmarkName = payload['name'] as string;
+      const bookmarkUrl = payload['url'] as string;
+      const orderIdx = (payload['orderIndex'] as string) || (payload['targetOrderIndex'] as string) || '';
           if (bookmarkId && bookmarkName && bookmarkUrl) {
             console.log(`Adding bookmark ${bookmarkId} to local state due to server event`);
             const bookmark: StoredBookmark = {
               id: bookmarkId,
               name: bookmarkName,
-              url: bookmarkUrl,
-              parentId: data.parentId as string | undefined,
-              isFavorite: (data.isFavorite as boolean) || false,
+        url: bookmarkUrl,
+        parentId: payload['parentId'] as string | undefined,
+        isFavorite: (payload['isFavorite'] as boolean) || false,
               namespace,
-              createdAt: (data.createdAt as number) || now,
-              updatedAt: (data.updatedAt as number) || now
+        orderIndex: orderIdx,
+        createdAt: (payload['createdAt'] as number) || now,
+        updatedAt: (payload['updatedAt'] as number) || now
             };
             await this.putInStore(bookmarksStore, bookmark);
             this.emit('dataChanged', { namespace, type: 'serverUpdate' });
@@ -1001,8 +1018,9 @@ class SSESharedWorkerImpl implements WorkerAPI {
         }
         
         case 'item_moved': {
-          const itemId = data.id as string;
-          const newParentId = data.newParentId as string | undefined;
+      const itemId = (payload['id'] as string) || (payload['itemId'] as string);
+      const newParentId = payload['newParentId'] as string | undefined;
+      const targetOrderIndex = payload['targetOrderIndex'] as string | undefined;
           if (itemId && newParentId !== undefined) {
             console.log(`Moving item ${itemId} to parent ${newParentId} due to server event`);
             const [bookmark, folder] = await Promise.all([
@@ -1014,6 +1032,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
               await this.putInStore(bookmarksStore, {
                 ...bookmark,
                 parentId: newParentId,
+                orderIndex: targetOrderIndex || (bookmark as StoredBookmark).orderIndex,
                 updatedAt: now
               });
               this.emit('dataChanged', { namespace, type: 'serverUpdate' });
@@ -1023,6 +1042,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
               await this.putInStore(foldersStore, {
                 ...folder,
                 parentId: newParentId,
+                orderIndex: targetOrderIndex || (folder as StoredFolder).orderIndex,
                 updatedAt: now
               });
               this.emit('dataChanged', { namespace, type: 'serverUpdate' });
@@ -1032,8 +1052,8 @@ class SSESharedWorkerImpl implements WorkerAPI {
         }
         
         case 'folder_toggled': {
-          const folderId = data.id as string;
-          const isOpen = data.isOpen as boolean;
+          const folderId = (payload['id'] as string) || (payload['folderId'] as string);
+          const isOpen = (payload['isOpen'] as boolean) ?? (payload['open'] as boolean);
           if (folderId && isOpen !== undefined) {
             console.log(`Toggling folder ${folderId} open state to ${isOpen} due to server event`);
             const folder = await this.getFromStore(foldersStore, folderId);
@@ -1050,8 +1070,8 @@ class SSESharedWorkerImpl implements WorkerAPI {
         }
         
         case 'bookmark_favorite_toggled': {
-          const bookmarkId = data.id as string;
-          const isFavorite = data.isFavorite as boolean;
+          const bookmarkId = (payload['id'] as string) || (payload['bookmarkId'] as string);
+          const isFavorite = (payload['isFavorite'] as boolean) ?? (payload['favorite'] as boolean);
           if (bookmarkId && isFavorite !== undefined) {
             console.log(`Toggling bookmark ${bookmarkId} favorite state to ${isFavorite} due to server event`);
             const bookmark = await this.getFromStore(bookmarksStore, bookmarkId);

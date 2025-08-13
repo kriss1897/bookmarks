@@ -113,7 +113,7 @@ export class SyncController {
     
     switch (operation.type) {
       case 'CREATE_FOLDER': {
-        const { id: tempId, name, parentId } = operation.payload;
+        const { id: tempId, name, parentId, orderIndex } = operation.payload;
         
         // With UUIDs, check if item already exists (idempotency)
         const existing = await this.itemExists(namespace, tempId);
@@ -125,10 +125,15 @@ export class SyncController {
           };
         }
 
+        if (!orderIndex || typeof orderIndex !== 'string') {
+          return { success: false, error: 'orderIndex is required' };
+        }
+
         const folder = await this.bookmarkService.createFolderWithId(namespace, {
           id: tempId,
           name,
-          parentId: parentId || null
+          parentId: parentId || null,
+          orderIndex
         });
 
         // Broadcast the folder creation event
@@ -137,6 +142,7 @@ export class SyncController {
           id: folder.id,
           name: folder.name,
           parentId: folder.parentId,
+          orderIndex: folder.orderIndex,
           isOpen: folder.open,
           createdAt: folder.createdAt,
           updatedAt: folder.updatedAt,
@@ -151,7 +157,7 @@ export class SyncController {
       }
 
       case 'CREATE_BOOKMARK': {
-        const { id: tempId, name, url, parentId, isFavorite = false } = operation.payload;
+        const { id: tempId, name, url, parentId, isFavorite = false, orderIndex } = operation.payload;
         
         // With UUIDs, check if item already exists (idempotency)
         const existing = await this.itemExists(namespace, tempId);
@@ -163,12 +169,17 @@ export class SyncController {
           };
         }
 
+        if (!orderIndex || typeof orderIndex !== 'string') {
+          return { success: false, error: 'orderIndex is required' };
+        }
+
         const bookmark = await this.bookmarkService.createBookmarkWithId(namespace, {
           id: tempId,
           title: name,
           url,
           parentId: parentId || null,
-          favorite: isFavorite
+          favorite: isFavorite,
+          orderIndex
         });
 
         // Broadcast the bookmark creation event
@@ -178,6 +189,7 @@ export class SyncController {
           name: bookmark.title,
           url: bookmark.url,
           parentId: bookmark.parentId,
+          orderIndex: bookmark.orderIndex,
           isFavorite: bookmark.favorite,
           createdAt: bookmark.createdAt,
           updatedAt: bookmark.updatedAt,
@@ -289,7 +301,7 @@ export class SyncController {
       }
 
       case 'MOVE_ITEM': {
-        const { id, newParentId, afterId } = operation.payload;
+        const { id, newParentId, targetOrderIndex } = operation.payload;
         
         // With UUIDs, no ID resolution needed - validate existence
         const itemExists = await this.itemExists(namespace, id);
@@ -311,29 +323,18 @@ export class SyncController {
           }
         }
 
-        // Validate after item exists if specified
-        if (afterId !== undefined && afterId !== null) {
-          const afterExists = await this.itemExists(namespace, afterId);
-          if (!afterExists) {
-            return {
-              success: false,
-              error: 'After item not found'
-            };
-          }
+        if (!targetOrderIndex || typeof targetOrderIndex !== 'string') {
+          return { success: false, error: 'targetOrderIndex is required' };
         }
 
-        await this.bookmarkService.moveItem(
-          id, 
-          newParentId || null, 
-          afterId || undefined
-        );
+        await this.bookmarkService.moveItem(id, newParentId || null, targetOrderIndex);
 
         // Broadcast the item move event
         this.eventPublisher.publishToNamespace(namespace, {
           type: 'item_moved',
           id: id,
           newParentId: newParentId || null,
-          afterItemId: afterId || null,
+          targetOrderIndex,
           timestamp: new Date().toISOString(),
         });
 

@@ -1,4 +1,4 @@
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { eq, and, isNull, sql, asc } from 'drizzle-orm';
 import { db } from '../db/connection.js';
 import { nodes, folders, bookmarks, folderState } from '../db/schema.js';
 import type { Node, Bookmark, Folder, FolderState } from '../db/schema.js';
@@ -9,8 +9,7 @@ export interface BookmarkItem {
   type: 'folder' | 'bookmark';
   namespace: string;
   parentId: string | null;
-  prevSiblingId: string | null;
-  nextSiblingId: string | null;
+  orderIndex: string;
   createdAt: number;
   updatedAt: number;
   // Folder-specific fields
@@ -24,7 +23,7 @@ export interface BookmarkItem {
 }
 
 export class BookmarkService {
-  // Get all items in a namespace, ordered by sibling relationships
+  // Get all items in a namespace, ordered by orderIndex
   async getNamespaceItems(namespace: string, parentId?: string): Promise<BookmarkItem[]> {
     const whereClause = parentId 
       ? and(eq(nodes.namespace, namespace), eq(nodes.parentId, parentId))
@@ -44,16 +43,15 @@ export class BookmarkService {
         eq(folderState.nodeId, nodes.id),
         eq(folderState.namespace, namespace)
       ))
-      .where(whereClause);
+      .where(whereClause)
+      .orderBy(asc(nodes.orderIndex));
 
-    // Build linked list order
     const items = result.map(row => ({
       id: row.node.id,
       type: row.node.type,
       namespace: row.node.namespace,
       parentId: row.node.parentId,
-      prevSiblingId: row.node.prevSiblingId,
-      nextSiblingId: row.node.nextSiblingId,
+      orderIndex: (row.node as any).orderIndex,
       createdAt: row.node.createdAt,
       updatedAt: row.node.updatedAt,
       // Folder fields
@@ -66,15 +64,11 @@ export class BookmarkService {
       favorite: row.bookmark?.favorite ?? false,
     })) as BookmarkItem[];
 
-    // Sort by linked list order
-    return this.sortByLinkedList(items);
+    return items;
   }
 
   // Create a new folder
-  async createFolder(namespace: string, name: string, parentId?: string): Promise<BookmarkItem> {
-    // Find the current tail of the sibling list
-    const currentTail = await this.findTailSiblingNonTx(namespace, parentId);
-
+  async createFolder(namespace: string, name: string, parentId: string | null | undefined, orderIndex: string): Promise<BookmarkItem> {
     // Generate UUID for the new node
     const nodeId = randomUUID();
 
@@ -84,16 +78,8 @@ export class BookmarkService {
       namespace,
       type: 'folder',
       parentId: parentId || null,
-      prevSiblingId: currentTail?.id || null,
-      nextSiblingId: null,
+      orderIndex,
     }).returning();
-
-    // Update the previous tail's nextSiblingId
-    if (currentTail) {
-      await db.update(nodes)
-        .set({ nextSiblingId: newNode.id, updatedAt: Math.floor(Date.now() / 1000) })
-        .where(eq(nodes.id, currentTail.id));
-    }
 
     // Insert folder details
     await db.insert(folders).values({
@@ -112,9 +98,8 @@ export class BookmarkService {
       id: newNode.id,
       type: 'folder' as const,
       namespace: newNode.namespace,
-      parentId: newNode.parentId,
-      prevSiblingId: newNode.prevSiblingId,
-      nextSiblingId: newNode.nextSiblingId,
+  parentId: newNode.parentId,
+  orderIndex: (newNode as any).orderIndex,
       createdAt: newNode.createdAt,
       updatedAt: newNode.updatedAt,
       name,
@@ -124,15 +109,13 @@ export class BookmarkService {
 
   // Create a new bookmark
   async createBookmark(
-    namespace: string, 
-    title: string, 
-    url: string, 
-    icon?: string, 
-    parentId?: string
+    namespace: string,
+    title: string,
+    url: string,
+    icon: string | undefined,
+    parentId: string | null | undefined,
+    orderIndex: string
   ): Promise<BookmarkItem> {
-    // Find the current tail of the sibling list
-    const currentTail = await this.findTailSiblingNonTx(namespace, parentId);
-
     // Generate UUID for the new node
     const nodeId = randomUUID();
 
@@ -142,16 +125,8 @@ export class BookmarkService {
       namespace,
       type: 'bookmark',
       parentId: parentId || null,
-      prevSiblingId: currentTail?.id || null,
-      nextSiblingId: null,
+      orderIndex,
     }).returning();
-
-    // Update the previous tail's nextSiblingId
-    if (currentTail) {
-      await db.update(nodes)
-        .set({ nextSiblingId: newNode.id, updatedAt: Math.floor(Date.now() / 1000) })
-        .where(eq(nodes.id, currentTail.id));
-    }
 
     // Insert bookmark details
     await db.insert(bookmarks).values({
@@ -167,8 +142,7 @@ export class BookmarkService {
       type: 'bookmark' as const,
       namespace: newNode.namespace,
       parentId: newNode.parentId,
-      prevSiblingId: newNode.prevSiblingId,
-      nextSiblingId: newNode.nextSiblingId,
+  orderIndex: (newNode as any).orderIndex,
       createdAt: newNode.createdAt,
       updatedAt: newNode.updatedAt,
       title,
@@ -180,23 +154,17 @@ export class BookmarkService {
 
   // Move an item (reorder or change parent)
   async moveItem(
-    itemId: string, 
-    newParentId: string | null, 
-    afterItemId?: string
+    itemId: string,
+    newParentId: string | null,
+    targetOrderIndex: string
   ): Promise<void> {
     const item = await db.select().from(nodes).where(eq(nodes.id, itemId)).get();
     if (!item) throw new Error('Item not found');
 
-    // Remove from current position
-    await this.removeFromLinkedListNonTx(item);
-
-    // Insert at new position
-    await this.insertIntoLinkedListNonTx(item.namespace, itemId, newParentId, afterItemId);
-
-    // Update the item's parent
     await db.update(nodes)
-      .set({ 
+      .set({
         parentId: newParentId,
+        orderIndex: targetOrderIndex,
         updatedAt: Math.floor(Date.now() / 1000)
       })
       .where(eq(nodes.id, itemId));
@@ -256,10 +224,6 @@ export class BookmarkService {
   async deleteItem(itemId: string): Promise<void> {
     const item = await db.select().from(nodes).where(eq(nodes.id, itemId)).get();
     if (!item) throw new Error('Item not found');
-
-    // Remove from linked list
-    await this.removeFromLinkedListNonTx(item);
-
     // Delete the node (cascades to children and related tables)
     await db.delete(nodes).where(eq(nodes.id, itemId));
   }
@@ -271,10 +235,8 @@ export class BookmarkService {
     id: string;
     name: string;
     parentId?: string | null;
+    orderIndex: string;
   }): Promise<BookmarkItem> {
-    // Find the current tail of the sibling list
-    const currentTail = await this.findTailSiblingNonTx(namespace, data.parentId || undefined);
-
     // Use the provided ID instead of generating a new one
     const nodeId = data.id;
 
@@ -284,16 +246,8 @@ export class BookmarkService {
       namespace,
       type: 'folder',
       parentId: data.parentId || null,
-      prevSiblingId: currentTail?.id || null,
-      nextSiblingId: null,
+      orderIndex: data.orderIndex,
     }).returning();
-
-    // Update the previous tail's nextSiblingId
-    if (currentTail) {
-      await db.update(nodes)
-        .set({ nextSiblingId: newNode.id, updatedAt: Math.floor(Date.now() / 1000) })
-        .where(eq(nodes.id, currentTail.id));
-    }
 
     // Insert folder details
     await db.insert(folders).values({
@@ -313,8 +267,7 @@ export class BookmarkService {
       type: 'folder' as const,
       namespace: newNode.namespace,
       parentId: newNode.parentId,
-      prevSiblingId: newNode.prevSiblingId,
-      nextSiblingId: newNode.nextSiblingId,
+  orderIndex: (newNode as any).orderIndex,
       createdAt: newNode.createdAt,
       updatedAt: newNode.updatedAt,
       name: data.name,
@@ -328,10 +281,8 @@ export class BookmarkService {
     url: string;
     parentId?: string | null;
     favorite?: boolean;
+    orderIndex: string;
   }): Promise<BookmarkItem> {
-    // Find the current tail of the sibling list
-    const currentTail = await this.findTailSiblingNonTx(namespace, data.parentId || undefined);
-
     // Use the provided ID instead of generating a new one
     const nodeId = data.id;
 
@@ -341,16 +292,8 @@ export class BookmarkService {
       namespace,
       type: 'bookmark',
       parentId: data.parentId || null,
-      prevSiblingId: currentTail?.id || null,
-      nextSiblingId: null,
+      orderIndex: data.orderIndex,
     }).returning();
-
-    // Update the previous tail's nextSiblingId
-    if (currentTail) {
-      await db.update(nodes)
-        .set({ nextSiblingId: newNode.id, updatedAt: Math.floor(Date.now() / 1000) })
-        .where(eq(nodes.id, currentTail.id));
-    }
 
     // Insert bookmark details
     await db.insert(bookmarks).values({
@@ -366,8 +309,7 @@ export class BookmarkService {
       type: 'bookmark' as const,
       namespace: newNode.namespace,
       parentId: newNode.parentId,
-      prevSiblingId: newNode.prevSiblingId,
-      nextSiblingId: newNode.nextSiblingId,
+  orderIndex: (newNode as any).orderIndex,
       createdAt: newNode.createdAt,
       updatedAt: newNode.updatedAt,
       title: data.title,
@@ -384,6 +326,8 @@ export class BookmarkService {
     url?: string;
     favorite?: boolean;
     open?: boolean;
+  orderIndex?: string;
+  parentId?: string | null;
   }): Promise<void> {
     const item = await db.select().from(nodes).where(eq(nodes.id, itemId)).get();
     if (!item) throw new Error('Item not found');
@@ -437,232 +381,11 @@ export class BookmarkService {
       }
     }
 
-    // Update the node's timestamp
-    await db.update(nodes)
-      .set({ updatedAt: Math.floor(Date.now() / 1000) })
-      .where(eq(nodes.id, itemId));
+    // Update node metadata and optionally orderIndex/parentId
+    const nodeUpdates: any = { updatedAt: Math.floor(Date.now() / 1000) };
+    if (updates.orderIndex !== undefined) nodeUpdates.orderIndex = updates.orderIndex;
+    if (updates.parentId !== undefined) nodeUpdates.parentId = updates.parentId;
+    await db.update(nodes).set(nodeUpdates).where(eq(nodes.id, itemId));
   }
-
-  // Helper methods
-  private findTailSibling(tx: any, namespace: string, parentId?: string) {
-    const whereClause = parentId 
-      ? and(
-          eq(nodes.namespace, namespace), 
-          eq(nodes.parentId, parentId),
-          isNull(nodes.nextSiblingId)
-        )
-      : and(
-          eq(nodes.namespace, namespace), 
-          isNull(nodes.parentId),
-          isNull(nodes.nextSiblingId)
-        );
-
-    return tx.select().from(nodes).where(whereClause).get();
-  }
-
-  private async findTailSiblingNonTx(namespace: string, parentId?: string) {
-    const whereClause = parentId 
-      ? and(
-          eq(nodes.namespace, namespace), 
-          eq(nodes.parentId, parentId),
-          isNull(nodes.nextSiblingId)
-        )
-      : and(
-          eq(nodes.namespace, namespace), 
-          isNull(nodes.parentId),
-          isNull(nodes.nextSiblingId)
-        );
-
-    return await db.select().from(nodes).where(whereClause).get();
-  }
-
-  private async removeFromLinkedList(tx: any, item: Node): Promise<void> {
-    // Update previous sibling's next pointer
-    if (item.prevSiblingId) {
-      await tx.update(nodes)
-        .set({ 
-          nextSiblingId: item.nextSiblingId,
-          updatedAt: Math.floor(Date.now() / 1000)
-        })
-        .where(eq(nodes.id, item.prevSiblingId));
-    }
-
-    // Update next sibling's previous pointer
-    if (item.nextSiblingId) {
-      await tx.update(nodes)
-        .set({ 
-          prevSiblingId: item.prevSiblingId,
-          updatedAt: Math.floor(Date.now() / 1000)
-        })
-        .where(eq(nodes.id, item.nextSiblingId));
-    }
-  }
-
-  private async removeFromLinkedListNonTx(item: Node): Promise<void> {
-    // Update previous sibling's next pointer
-    if (item.prevSiblingId) {
-      await db.update(nodes)
-        .set({ 
-          nextSiblingId: item.nextSiblingId,
-          updatedAt: Math.floor(Date.now() / 1000)
-        })
-        .where(eq(nodes.id, item.prevSiblingId));
-    }
-
-    // Update next sibling's previous pointer
-    if (item.nextSiblingId) {
-      await db.update(nodes)
-        .set({ 
-          prevSiblingId: item.prevSiblingId,
-          updatedAt: Math.floor(Date.now() / 1000)
-        })
-        .where(eq(nodes.id, item.nextSiblingId));
-    }
-  }
-
-  private async insertIntoLinkedList(
-    tx: any, 
-    namespace: string, 
-    itemId: string, 
-    parentId: string | null, 
-    afterItemId?: string
-  ): Promise<void> {
-    if (afterItemId) {
-      // Insert after specific item
-      const afterItem = await tx.select().from(nodes).where(eq(nodes.id, afterItemId)).get();
-      if (!afterItem) throw new Error('After item not found');
-
-      const nextItem = afterItem.nextSiblingId;
-
-      // Update the item being moved
-      await tx.update(nodes)
-        .set({ 
-          prevSiblingId: afterItemId,
-          nextSiblingId: nextItem,
-          updatedAt: Math.floor(Date.now() / 1000)
-        })
-        .where(eq(nodes.id, itemId));
-
-      // Update the after item
-      await tx.update(nodes)
-        .set({ 
-          nextSiblingId: itemId,
-          updatedAt: Math.floor(Date.now() / 1000)
-        })
-        .where(eq(nodes.id, afterItemId));
-
-      // Update the next item if it exists
-      if (nextItem) {
-        await tx.update(nodes)
-          .set({ 
-            prevSiblingId: itemId,
-            updatedAt: Math.floor(Date.now() / 1000)
-          })
-          .where(eq(nodes.id, nextItem));
-      }
-    } else {
-      // Insert at the end
-      const tail = await this.findTailSibling(tx, namespace, parentId || undefined);
-      
-      await tx.update(nodes)
-        .set({ 
-          prevSiblingId: tail?.id || null,
-          nextSiblingId: null,
-          updatedAt: Math.floor(Date.now() / 1000)
-        })
-        .where(eq(nodes.id, itemId));
-
-      if (tail) {
-        await tx.update(nodes)
-          .set({ 
-            nextSiblingId: itemId,
-            updatedAt: Math.floor(Date.now() / 1000)
-          })
-          .where(eq(nodes.id, tail.id));
-      }
-    }
-  }
-
-  private async insertIntoLinkedListNonTx(
-    namespace: string, 
-    itemId: string, 
-    parentId: string | null, 
-    afterItemId?: string
-  ): Promise<void> {
-    if (afterItemId) {
-      // Insert after specific item
-      const afterItem = await db.select().from(nodes).where(eq(nodes.id, afterItemId)).get();
-      if (!afterItem) throw new Error('After item not found');
-
-      const nextItem = afterItem.nextSiblingId;
-
-      // Update the item being moved
-      await db.update(nodes)
-        .set({ 
-          prevSiblingId: afterItemId,
-          nextSiblingId: nextItem,
-          updatedAt: Math.floor(Date.now() / 1000)
-        })
-        .where(eq(nodes.id, itemId));
-
-      // Update the after item
-      await db.update(nodes)
-        .set({ 
-          nextSiblingId: itemId,
-          updatedAt: Math.floor(Date.now() / 1000)
-        })
-        .where(eq(nodes.id, afterItemId));
-
-      // Update the next item if it exists
-      if (nextItem) {
-        await db.update(nodes)
-          .set({ 
-            prevSiblingId: itemId,
-            updatedAt: Math.floor(Date.now() / 1000)
-          })
-          .where(eq(nodes.id, nextItem));
-      }
-    } else {
-      // Insert at the end
-      const tail = await this.findTailSiblingNonTx(namespace, parentId || undefined);
-      
-      await db.update(nodes)
-        .set({ 
-          prevSiblingId: tail?.id || null,
-          nextSiblingId: null,
-          updatedAt: Math.floor(Date.now() / 1000)
-        })
-        .where(eq(nodes.id, itemId));
-
-      if (tail) {
-        await db.update(nodes)
-          .set({ 
-            nextSiblingId: itemId,
-            updatedAt: Math.floor(Date.now() / 1000)
-          })
-          .where(eq(nodes.id, tail.id));
-      }
-    }
-  }
-
-  private sortByLinkedList(items: BookmarkItem[]): BookmarkItem[] {
-    if (items.length === 0) return items;
-
-    // Find head (item with no prev sibling)
-    const head = items.find(item => item.prevSiblingId === null);
-    if (!head) return items; // Fallback to unsorted if no head found
-
-    // Build ordered list
-    const ordered: BookmarkItem[] = [];
-    const itemMap = new Map(items.map(item => [item.id, item]));
-    
-    let current: BookmarkItem | null = head;
-    while (current) {
-      ordered.push(current);
-      if (!current.nextSiblingId) break;
-      current = itemMap.get(current.nextSiblingId) || null;
-    }
-
-    return ordered;
-  }
+  // No linked-list helpers needed with orderIndex
 }

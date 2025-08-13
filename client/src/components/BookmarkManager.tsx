@@ -4,6 +4,7 @@ import { bookmarkAPI } from '../services/bookmarkAPI';
 import type { LocalBookmarkItem } from '../services/localDataService';
 import { Button } from '@/components/ui/button';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
+import { generateKeyBetween } from 'fractional-indexing';
 
 interface BookmarkManagerProps {
   namespace: string;
@@ -57,7 +58,7 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
           if (eventData.namespace === namespace) {
             console.log('Data changed in namespace:', namespace, 'reloading items');
             // Force immediate reload
-            await loadItems();
+            // await loadItems();
           }
         });
 
@@ -88,7 +89,11 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     
     try {
       setLoading(true);
-      await bookmarkAPI.createFolder(namespace, { name: folderName });
+      // Compute an orderIndex at the end of roots
+      const rootItems = items.filter(i => !i.parentId);
+      const last = rootItems[rootItems.length - 1];
+  const orderIndex = last ? generateKeyBetween(last.orderIndex, null) : generateKeyBetween(null, null);
+      await bookmarkAPI.createFolder(namespace, { name: folderName, orderIndex });
       setFolderName('');
       setShowAddForm(null);
       await loadItems();
@@ -105,9 +110,13 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     
     try {
       setLoading(true);
+      const rootItems = items.filter(i => !i.parentId);
+      const last = rootItems[rootItems.length - 1];
+  const orderIndex = last ? generateKeyBetween(last.orderIndex, null) : generateKeyBetween(null, null);
       await bookmarkAPI.createBookmark(namespace, { 
         title: bookmarkTitle, 
-        url: bookmarkUrl 
+        url: bookmarkUrl,
+        orderIndex
       });
       setBookmarkTitle('');
       setBookmarkUrl('');
@@ -158,6 +167,46 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     }
   };
 
+  // Move item up
+  const moveItemUp = async (index: number) => {
+    if (index <= 0) return;
+    const item = items[index];
+    const prevItem = items[index - 1];
+    if (!item || !prevItem) return;
+    try {
+      setLoading(true);
+      const before = items[index - 2]?.orderIndex || null;
+      const targetOrderIndex = generateKeyBetween(before, prevItem.orderIndex);
+      await bookmarkAPI.moveItem(namespace, item.id, undefined, targetOrderIndex);
+      await loadItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to move item up');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Move item down
+  const moveItemDown = async (index: number) => {
+    if (index >= items.length - 1) return;
+    const item = items[index];
+    const nextItem = items[index + 1];
+
+    console.log(item, nextItem);
+
+    if (!item || !nextItem) return;
+    try {
+      setLoading(true);
+      const after = items[index + 2]?.orderIndex || null;
+      const targetOrderIndex = generateKeyBetween(nextItem.orderIndex, after);
+      await bookmarkAPI.moveItem(namespace, item.id, undefined, targetOrderIndex);
+      await loadItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to move item down');
+    } finally {
+      setLoading(false);
+    }
+  };
   if (loading && items.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -169,20 +218,7 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">
-          Bookmarks for "{namespace}" 
-          <span className="text-sm text-gray-500 ml-2">
-            (Last updated: {new Date().toLocaleTimeString()})
-          </span>
-        </h2>
         <div className="flex gap-2">
-          <Button
-            onClick={loadItems}
-            variant="outline"
-            size="sm"
-          >
-            🔄 Refresh
-          </Button>
           <Button
             onClick={() => setShowAddForm('folder')}
             variant="outline"
@@ -267,12 +303,31 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
             No bookmarks yet. Add some to get started!
           </div>
         ) : (
-          items.map((item) => (
+          items.map((item, index) => (
             <div
               key={item.id}
               className="flex items-center justify-between rounded border p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               <div className="flex items-center gap-3">
+                {/* Move up/down buttons */}
+                <div className="flex flex-col gap-1 mr-2">
+                  <button
+                    onClick={() => moveItemUp(index)}
+                    disabled={index === 0}
+                    title="Move up"
+                    className="text-gray-500 hover:text-blue-600 disabled:opacity-30"
+                  >
+                    ▲ Up
+                  </button>
+                  <button
+                    onClick={() => moveItemDown(index)}
+                    disabled={index === items.length - 1}
+                    title="Move down"
+                    className="text-gray-500 hover:text-blue-600 disabled:opacity-30"
+                  >
+                    ▼ Down
+                  </button>
+                </div>
                 {item.type === 'folder' ? (
                   <button
                     onClick={() => toggleFolder(item.id)}

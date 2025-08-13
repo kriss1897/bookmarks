@@ -44,6 +44,7 @@ export interface CreateBookmarkPayload {
   url: string;
   parentId?: string;
   isFavorite?: boolean;
+  orderIndex: string;
 }
 
 export interface UpdateBookmarkPayload {
@@ -61,6 +62,7 @@ export interface CreateFolderPayload {
   id: string; // temp ID initially
   name: string;
   parentId?: string;
+  orderIndex: string;
 }
 
 export interface UpdateFolderPayload {
@@ -72,7 +74,7 @@ export interface UpdateFolderPayload {
 export interface MoveItemPayload {
   id: string;
   newParentId?: string;
-  afterId?: string; // For ordering
+  targetOrderIndex: string; // New order index computed on client
 }
 
 // Worker message types

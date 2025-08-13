@@ -8,6 +8,7 @@ export interface LocalBookmark {
   parentId?: number;
   isFavorite: boolean;
   namespace: string;
+  orderIndex: string;
   isTemporary: boolean; // true for temp IDs
   createdAt: number;
   updatedAt: number;
@@ -19,6 +20,7 @@ export interface LocalFolder {
   parentId?: number;
   isOpen: boolean;
   namespace: string;
+  orderIndex: string;
   isTemporary: boolean; // true for temp IDs
   createdAt: number;
   updatedAt: number;
@@ -54,9 +56,9 @@ export class LocalDatabase extends Dexie {
     
     // Use a high version number to avoid conflicts with existing databases
     // Date-based versioning: YYYYMMDD
-    this.version(20250813).stores({
-      bookmarks: '&id, namespace, parentId, isTemporary, createdAt, updatedAt',
-      folders: '&id, namespace, parentId, isTemporary, createdAt, updatedAt',
+    this.version(20250814).stores({
+      bookmarks: '&id, namespace, parentId, orderIndex, isTemporary, createdAt, updatedAt',
+      folders: '&id, namespace, parentId, orderIndex, isTemporary, createdAt, updatedAt',
       operations: '&id, namespace, status, clientCreatedAt, createdAt',
       syncMeta: '&namespace, lastSyncTimestamp'
     });
@@ -107,11 +109,11 @@ export class LocalDatabase extends Dexie {
   // Get all items for a namespace (bookmarks + folders)
   async getNamespaceItems(namespace: string): Promise<(LocalBookmark | LocalFolder)[]> {
     const [bookmarks, folders] = await Promise.all([
-      this.bookmarks.where('namespace').equals(namespace).toArray(),
-      this.folders.where('namespace').equals(namespace).toArray()
+      this.bookmarks.where('namespace').equals(namespace).sortBy('orderIndex'),
+      this.folders.where('namespace').equals(namespace).sortBy('orderIndex')
     ]);
     
-    return [...bookmarks, ...folders].sort((a, b) => a.createdAt - b.createdAt);
+    return [...bookmarks, ...folders].sort((a, b) => (a.orderIndex || '').localeCompare(b.orderIndex || ''));
   }
 
   // Get pending operations for namespace
