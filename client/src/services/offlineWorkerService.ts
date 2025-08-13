@@ -1,5 +1,5 @@
 import * as Comlink from "comlink";
-import type { WorkerAPI } from "../workers/sse-shared-worker";
+import type { WorkerAPI } from "../workers/worker-types";
 import type { Operation } from "../types/operations";
 import { generateClientId, OperationType } from "../types/operations";
 
@@ -32,7 +32,7 @@ export class OfflineWorkerService {
   private async initializeWorker() {
     try {
       this.worker = new SharedWorker(
-        new URL("../workers/sse-shared-worker.ts", import.meta.url),
+        new URL("../workers/shared-worker.ts", import.meta.url),
         { type: "module", name: "sse-worker" }
       );
 

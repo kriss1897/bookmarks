@@ -1,7 +1,7 @@
 import { createContext, useState, useEffect, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { offlineWorkerService } from '../services/offlineWorkerService';
-import type { WorkerEventType } from '../workers/sse-shared-worker';
+import type { WorkerEventType } from '../workers/worker-types';
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
