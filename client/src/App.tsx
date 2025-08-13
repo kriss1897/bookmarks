@@ -2,14 +2,18 @@ import { SSEProvider } from './contexts/SSEContext'
 import { DragDropProvider } from './contexts/DragDropContext'
 import { NamespaceSelector } from './components/NamespaceSelector'
 import { BookmarkManager } from './components/BookmarkManager'
+import { DatabaseBlockedNotification } from './components/DatabaseBlockedNotification'
+import { DevTools } from './components/DevTools'
 // import { SSEControls } from './components/SSEControls'
 // import { EventsList } from './components/EventsList'
 // import { DragDropDemo } from './components/DragDropDemo'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useSSE } from './hooks/useSSE'
+import { useDatabaseBlockedNotification } from './hooks/useDatabaseBlockedNotification'
 
 function AppContent() {
   const { namespace } = useSSE();
+  const { isBlocked, dismissNotification } = useDatabaseBlockedNotification();
 
   return (
     <div className="flex min-h-svh flex-col items-center justify-start p-4">
@@ -25,7 +29,15 @@ function AppContent() {
           <div className="w-full mb-8">
             <BookmarkManager namespace={namespace} />
           </div>
+
+          {/* Development Tools */}
+          <DevTools namespace={namespace} />
         </>
+      )}
+
+      {/* Database Blocked Notification */}
+      {isBlocked && (
+        <DatabaseBlockedNotification onClose={dismissNotification} />
       )}
     </div>
   );

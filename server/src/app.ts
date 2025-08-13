@@ -4,6 +4,7 @@ import { EventPublisher } from './services/EventPublisher.js';
 import { APIRoutes } from './routes/api.routes.js';
 import { SSERoutes } from './routes/sse.routes.js';
 import { BookmarkRoutes } from './routes/bookmark.routes.js';
+import { syncRouter } from './routes/sync.routes.js';
 import { initializeDatabase, closeDatabase } from './db/connection.js';
 
 // Initialize database
@@ -15,18 +16,6 @@ const eventPublisher = new EventPublisher(sseManager);
 const apiRoutes = new APIRoutes(eventPublisher, sseManager);
 const sseRoutes = new SSERoutes(sseManager);
 const bookmarkRoutes = new BookmarkRoutes(eventPublisher);
-
-// Debug: check if all methods exist
-console.log('BookmarkRoutes methods:');
-console.log('getItems:', typeof bookmarkRoutes.getItems);
-console.log('createFolder:', typeof bookmarkRoutes.createFolder);
-console.log('createBookmark:', typeof bookmarkRoutes.createBookmark);
-console.log('moveItem:', typeof bookmarkRoutes.moveItem);
-console.log('toggleFolderState:', typeof bookmarkRoutes.toggleFolderState);
-console.log('toggleBookmarkFavorite:', typeof bookmarkRoutes.toggleBookmarkFavorite);
-console.log('deleteItem:', typeof bookmarkRoutes.deleteItem);
-console.log('updateBookmark:', typeof bookmarkRoutes.updateBookmark);
-console.log('updateFolder:', typeof bookmarkRoutes.updateFolder);
 
 const app = express();
 
@@ -55,6 +44,9 @@ app.put('/api/bookmarks/:namespace/folders/:folderId', bookmarkRoutes.updateFold
 
 // SSE Route
 app.get('/api/events', sseRoutes.handleSSEConnection);
+
+// Sync Route (for offline-first operations)
+app.use('/api/sync', syncRouter);
 
 // Graceful shutdown
 process.on('SIGTERM', () => {

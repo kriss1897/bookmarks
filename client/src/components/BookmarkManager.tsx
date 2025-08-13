@@ -143,6 +143,20 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
           // For move operations, we'll still refetch since it's more complex
           loadItems();
           break;
+          
+        case 'initialDataLoaded': {
+          console.log('Initial data loaded from server, refreshing local view');
+          // Refresh the items to show the latest server data
+          loadItems();
+          break;
+        }
+          
+        case 'initialDataError': {
+          const eventData = extractEventData(latestMessage.data);
+          console.warn('Failed to load initial server data:', eventData?.error);
+          // Continue with local data only
+          break;
+        }
       }
     }
   }, [sseMessages, namespace, loadItems]);
@@ -236,7 +250,7 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   };
 
   const handleDeleteItem = async (itemId: number) => {
-    if (!confirm('Are you sure you want to delete this item?')) return;
+    // if (!confirm('Are you sure you want to delete this item?')) return;
 
     // Store original items before optimistic update
     const originalItems = items;

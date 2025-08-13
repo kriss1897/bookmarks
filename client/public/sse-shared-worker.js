@@ -1,4 +1,5 @@
 // SSE Shared Worker - manages SSE connections and broadcasts events to all tabs
+// Extended with offline-first functionality: operation queue, sync, and IndexedDB management
 // This worker maintains a single SSE connection per namespace and distributes events to all connected tabs
 
 class SSESharedWorker {
@@ -6,6 +7,11 @@ class SSESharedWorker {
     this.connections = new Map();
     this.connectedPorts = new Map();
     this.portNamespaces = new Map();
+    
+    // Operation queue and sync management
+    this.syncStatus = new Map(); // namespace -> sync status
+    this.batchTimeouts = new Map(); // namespace -> timeout
+    this.clientId = this.generateClientId();
     
     // Reconnection configuration
     this.reconnectConfig = {
@@ -17,7 +23,20 @@ class SSESharedWorker {
       backoffMultiplier: 2    // Exponential backoff multiplier
     };
     
-    console.log('SSE Shared Worker initialized');
+    // Sync configuration
+    this.syncConfig = {
+      batchWindow: 100,       // 100ms batching window
+      maxRetries: 5,          // Max retry attempts per operation
+      retryDelays: [1000, 2000, 5000, 10000, 30000] // Progressive backoff
+    };
+    
+    console.log('SSE Shared Worker initialized with offline-first capabilities');
+    
+    // Initialize IndexedDB
+    this.initializeDB();
+    
+    // Check for reachability periodically
+    this.startReachabilityCheck();
     
     // Handle new connections from tabs
     self.addEventListener('connect', (event) => {
@@ -43,6 +62,208 @@ class SSESharedWorker {
   
   generatePortId() {
     return `port-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  generateClientId() {
+    // Try to get from storage first, otherwise generate new one
+    try {
+      const stored = localStorage.getItem('clientId');
+      if (stored) return stored;
+    } catch (e) {
+      // localStorage not available in worker context
+    }
+    
+    return `client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  // IndexedDB initialization (simplified for worker context)
+  async initializeDB() {
+    try {
+      this.db = await this.openDB();
+      console.log('IndexedDB initialized in worker');
+      
+      // Resume pending syncs on startup
+      await this.resumePendingSyncs();
+    } catch (error) {
+      console.error('Failed to initialize IndexedDB:', error);
+      
+      // If it's a version error, try to delete and recreate the database
+      if (error.name === 'VersionError') {
+        console.log('Attempting to reset IndexedDB due to version conflict...');
+        await this.resetDatabase();
+      }
+    }
+  }
+
+  async resetDatabase() {
+    try {
+      // Delete the database
+      const deleteReq = indexedDB.deleteDatabase('BookmarksOfflineDB');
+      
+      await new Promise((resolve, reject) => {
+        deleteReq.onsuccess = () => resolve(true);
+        deleteReq.onerror = () => reject(deleteReq.error);
+        deleteReq.onblocked = () => {
+          console.warn('Database deletion blocked - close all tabs and try again');
+          reject(new Error('Database deletion blocked'));
+        };
+      });
+      
+      console.log('Database deleted successfully');
+      
+      // Reinitialize
+      this.db = await this.openDB();
+      console.log('Database recreated successfully');
+      
+    } catch (error) {
+      console.error('Failed to reset database:', error);
+    }
+  }
+
+  openDB() {
+    return new Promise((resolve, reject) => {
+      // Use a high version number to avoid conflicts with existing databases
+      const dbVersion = 20250813; // Date-based versioning: YYYYMMDD
+      const request = indexedDB.open('BookmarksOfflineDB', dbVersion);
+      
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+      
+      request.onblocked = () => {
+        console.warn('Database upgrade blocked by other connections. This usually happens when multiple tabs are open.');
+        console.log('Please close other tabs or windows using this app and refresh this page.');
+        
+        // Show a user-friendly message
+        this.broadcastToAllPorts({
+          type: 'DATABASE_BLOCKED',
+          data: {
+            message: 'Database upgrade blocked. Please close other tabs and refresh.',
+            action: 'close_other_tabs'
+          }
+        });
+        
+        // Try to proceed after a delay, hoping other connections close
+        setTimeout(() => {
+          console.log('Retrying database opening after blocked upgrade...');
+          // Don't recursively call openDB to avoid infinite loops
+          const retryRequest = indexedDB.open('BookmarksOfflineDB', dbVersion);
+          retryRequest.onsuccess = () => resolve(retryRequest.result);
+          retryRequest.onerror = () => reject(retryRequest.error);
+          retryRequest.onblocked = () => {
+            // If still blocked, reject with helpful message
+            reject(new Error('Database upgrade permanently blocked by other connections. Please close all tabs and try again.'));
+          };
+        }, 2000);
+      };
+      
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        console.log(`Upgrading database from version ${event.oldVersion} to ${event.newVersion}`);
+        
+        // Clear existing stores for clean upgrade
+        const existingStoreNames = Array.from(db.objectStoreNames);
+        existingStoreNames.forEach(storeName => {
+          console.log(`Removing existing store: ${storeName}`);
+          db.deleteObjectStore(storeName);
+        });
+        
+        // Create fresh stores
+        const bookmarksStore = db.createObjectStore('bookmarks', { keyPath: 'id' });
+        bookmarksStore.createIndex('namespace', 'namespace');
+        bookmarksStore.createIndex('isTemporary', 'isTemporary');
+        
+        const foldersStore = db.createObjectStore('folders', { keyPath: 'id' });
+        foldersStore.createIndex('namespace', 'namespace');
+        foldersStore.createIndex('isTemporary', 'isTemporary');
+        
+        const operationsStore = db.createObjectStore('operations', { keyPath: 'id' });
+        operationsStore.createIndex('namespace', 'namespace');
+        operationsStore.createIndex('status', 'status');
+        operationsStore.createIndex('clientCreatedAt', 'clientCreatedAt');
+        
+        db.createObjectStore('syncMeta', { keyPath: 'namespace' });
+        
+        console.log('Database stores created successfully');
+      };
+    });
+  }
+
+  // Reachability check
+  startReachabilityCheck() {
+    this.isOnline = navigator.onLine;
+    
+    // Listen to online/offline events
+    self.addEventListener('online', () => {
+      console.log('Worker detected online');
+      this.isOnline = true;
+      this.onConnectivityChange();
+    });
+    
+    self.addEventListener('offline', () => {
+      console.log('Worker detected offline');
+      this.isOnline = false;
+      this.onConnectivityChange();
+    });
+    
+    // Periodic ping to verify actual reachability
+    setInterval(() => {
+      this.checkReachability();
+    }, 10000); // Check every 10 seconds
+  }
+
+  async checkReachability() {
+    try {
+      const response = await fetch('/api/ping', { 
+        method: 'HEAD',
+        signal: AbortSignal.timeout(5000)
+      });
+      const isReachable = response.ok;
+      
+      if (this.isOnline !== isReachable) {
+        this.isOnline = isReachable;
+        this.onConnectivityChange();
+      }
+    } catch {
+      if (this.isOnline) {
+        this.isOnline = false;
+        this.onConnectivityChange();
+      }
+    }
+  }
+
+  onConnectivityChange() {
+    // Broadcast status to all tabs
+    this.broadcastToAllPorts({
+      type: 'connectivityChanged',
+      data: { isOnline: this.isOnline }
+    });
+    
+    // Start sync if we're back online
+    if (this.isOnline) {
+      this.resumePendingSyncs();
+    }
+  }
+
+  async resumePendingSyncs() {
+    if (!this.db) return;
+    
+    try {
+      const transaction = this.db.transaction(['syncMeta'], 'readonly');
+      const store = transaction.objectStore('syncMeta');
+      const request = store.getAll();
+      
+      request.onsuccess = () => {
+        const metas = request.result;
+        for (const meta of metas) {
+          if (meta.pendingOperationsCount > 0) {
+            console.log(`Resuming sync for namespace: ${meta.namespace}`);
+            this.scheduleBatchSync(meta.namespace);
+          }
+        }
+      };
+    } catch (error) {
+      console.error('Error resuming pending syncs:', error);
+    }
   }
   
   getConnectionStatus(connectionManager) {
@@ -75,6 +296,7 @@ class SSESharedWorker {
     }
     
     switch (message.type) {
+      // Existing SSE handlers
       case 'connect':
         this.handleConnect(portId, message.namespace, port);
         break;
@@ -90,6 +312,48 @@ class SSESharedWorker {
       case 'cleanup':
         this.handleCleanup(message.namespace);
         break;
+      
+      // New offline-first handlers
+      case 'enqueueOperation':
+        this.handleEnqueueOperation(portId, message.data, port);
+        break;
+      case 'syncNow':
+        this.handleSyncNow(message.data, port);
+        break;
+      case 'subscribe':
+        this.handleSubscribe(portId, message.data, port);
+        break;
+      case 'getStatus':
+        this.handleGetStatus(message.data, port);
+        break;
+      
+      case 'GET_PENDING_OPERATIONS_COUNT':
+        this.handleGetPendingOperationsCount(message.namespace, port);
+        break;
+      
+      case 'RESET_DATABASE':
+        this.handleResetDatabase(port);
+        break;
+      
+      // Database operation handlers  
+      case 'GET_NAMESPACE_ITEMS':
+        this.handleGetNamespaceItems(message.data, port);
+        break;
+      case 'APPLY_OPERATION_OPTIMISTICALLY':
+        this.handleApplyOperationOptimistically(message.data, port);
+        break;
+      case 'GET_BY_ID':
+        this.handleGetById(message.data, port);
+        break;
+      case 'RECONCILE_WITH_SERVER':
+        this.handleReconcileWithServer(message.data, port);
+        break;
+      
+      // Initial data fetch handler
+      case 'FETCH_INITIAL_DATA':
+        this.handleFetchInitialData(message.data, port);
+        break;
+        
       default:
         console.warn(`Unknown message type: ${message.type}`);
     }
@@ -245,6 +509,242 @@ class SSESharedWorker {
         this.closeSSEConnection(manager);
       }
       this.connections.clear();
+    }
+  }
+
+  // New offline-first handlers
+  async handleEnqueueOperation(portId, data, port) {
+    const { namespace, operation } = data;
+    
+    try {
+      // Add operation to IndexedDB
+      await this.enqueueOperation(operation);
+      
+      // Apply operation optimistically to local data
+      await this.applyOperationOptimistically(operation);
+      
+      // Notify all tabs about data change
+      this.broadcastToNamespace(namespace, {
+        type: 'dataChanged',
+        data: { namespace }
+      });
+      
+      // Schedule batch sync
+      this.scheduleBatchSync(namespace);
+      
+      // Send acknowledgment
+      this.sendToPort(port, {
+        type: 'ack',
+        data: { operationId: operation.id }
+      });
+      
+    } catch (error) {
+      console.error('Error enqueuing operation:', error);
+      this.sendToPort(port, {
+        type: 'error',
+        data: { 
+          reason: 'Failed to enqueue operation',
+          operationId: operation.id 
+        }
+      });
+    }
+  }
+
+  async handleSyncNow(data, port) {
+    const { namespace } = data;
+    
+    if (namespace) {
+      await this.syncNamespace(namespace);
+    } else {
+      // Sync all namespaces
+      const namespaces = Array.from(new Set(Array.from(this.portNamespaces.values())));
+      for (const ns of namespaces) {
+        await this.syncNamespace(ns);
+      }
+    }
+  }
+
+  async handleSubscribe(portId, data, port) {
+    const { namespace } = data;
+    
+    // Associate port with namespace (for data change notifications)
+    this.portNamespaces.set(portId, namespace);
+    
+    // Send current pending count
+    const pendingCount = await this.getPendingCount(namespace);
+    this.sendToPort(port, {
+      type: 'pendingCount',
+      data: { namespace, count: pendingCount }
+    });
+  }
+
+  async handleGetStatus(data, port) {
+    const { namespace } = data;
+    
+    if (namespace) {
+      const pendingCount = await this.getPendingCount(namespace);
+      const syncStatus = this.syncStatus.get(namespace) || 'idle';
+      
+      this.sendToPort(port, {
+        type: 'status',
+        data: {
+          namespace,
+          isOnline: this.isOnline,
+          pendingCount,
+          syncStatus
+        }
+      });
+    } else {
+      // Global status
+      this.sendToPort(port, {
+        type: 'status',
+        data: {
+          isOnline: this.isOnline,
+          clientId: this.clientId
+        }
+      });
+    }
+  }
+
+  async handleGetPendingOperationsCount(namespace, port) {
+    if (!namespace) {
+      console.warn('No namespace provided for pending operations count');
+      return;
+    }
+
+    try {
+      const count = await this.getPendingCount(namespace);
+      this.sendToPort(port, {
+        type: 'PENDING_OPERATIONS_COUNT',
+        namespace,
+        count
+      });
+    } catch (error) {
+      console.error('Error getting pending operations count:', error);
+      this.sendToPort(port, {
+        type: 'PENDING_OPERATIONS_COUNT',
+        namespace,
+        count: 0
+      });
+    }
+  }
+
+  async handleResetDatabase(port) {
+    try {
+      console.log('Resetting database as requested by client...');
+      await this.resetDatabase();
+      
+      this.sendToPort(port, {
+        type: 'DATABASE_RESET_SUCCESS',
+        message: 'Database reset successfully'
+      });
+    } catch (error) {
+      console.error('Failed to reset database:', error);
+      this.sendToPort(port, {
+        type: 'DATABASE_RESET_ERROR',
+        error: error.message
+      });
+    }
+  }
+
+  // Database operation handlers
+  async handleGetNamespaceItems(data, port) {
+    try {
+      const { namespace, requestId } = data;
+      const items = await this.getNamespaceItems(namespace);
+      
+      this.sendToPort(port, {
+        type: 'GET_NAMESPACE_ITEMS_RESPONSE',
+        requestId,
+        data: items
+      });
+    } catch (error) {
+      console.error('Failed to get namespace items:', error);
+      this.sendToPort(port, {
+        type: 'GET_NAMESPACE_ITEMS_ERROR',
+        requestId: data.requestId,
+        error: error.message
+      });
+    }
+  }
+
+  async handleApplyOperationOptimistically(data, port) {
+    try {
+      const { operation, requestId } = data;
+      await this.applyOperationOptimistically(operation);
+      
+      this.sendToPort(port, {
+        type: 'APPLY_OPERATION_OPTIMISTICALLY_RESPONSE',
+        requestId,
+        success: true
+      });
+    } catch (error) {
+      console.error('Failed to apply operation optimistically:', error);
+      this.sendToPort(port, {
+        type: 'APPLY_OPERATION_OPTIMISTICALLY_ERROR',
+        requestId: data.requestId,
+        error: error.message
+      });
+    }
+  }
+
+  async handleGetById(data, port) {
+    try {
+      const { namespace, id, requestId } = data;
+      const item = await this.getItemById(namespace, id);
+      
+      this.sendToPort(port, {
+        type: 'GET_BY_ID_RESPONSE',
+        requestId,
+        data: item
+      });
+    } catch (error) {
+      console.error('Failed to get item by ID:', error);
+      this.sendToPort(port, {
+        type: 'GET_BY_ID_ERROR',
+        requestId: data.requestId,
+        error: error.message
+      });
+    }
+  }
+
+  async handleReconcileWithServer(data, port) {
+    try {
+      const { namespace, serverItems, requestId } = data;
+      await this.reconcileWithServerState(namespace, serverItems);
+      
+      this.sendToPort(port, {
+        type: 'RECONCILE_WITH_SERVER_RESPONSE',
+        requestId,
+        success: true
+      });
+    } catch (error) {
+      console.error('Failed to reconcile with server:', error);
+      this.sendToPort(port, {
+        type: 'RECONCILE_WITH_SERVER_ERROR',
+        requestId: data.requestId,
+        error: error.message
+      });
+    }
+  }
+
+  async handleFetchInitialData(data, port) {
+    try {
+      const { namespace, requestId } = data;
+      await this.fetchInitialServerData(namespace);
+      
+      this.sendToPort(port, {
+        type: 'FETCH_INITIAL_DATA_RESPONSE',
+        requestId,
+        success: true
+      });
+    } catch (error) {
+      console.error('Failed to fetch initial data:', error);
+      this.sendToPort(port, {
+        type: 'FETCH_INITIAL_DATA_ERROR',
+        requestId: data.requestId,
+        error: error.message
+      });
     }
   }
   
@@ -576,6 +1076,886 @@ class SSESharedWorker {
     } catch (error) {
       console.error('Error fetching connection count:', error);
     }
+  }
+
+  // Operation queue management
+  async enqueueOperation(operation) {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const transaction = this.db.transaction(['operations'], 'readwrite');
+    const store = transaction.objectStore('operations');
+    
+    const storedOperation = {
+      id: operation.id,
+      clientId: operation.clientId,
+      namespace: operation.namespace,
+      type: operation.type,
+      payload: JSON.stringify(operation.payload),
+      clientCreatedAt: operation.clientCreatedAt,
+      status: operation.status,
+      retryCount: operation.retryCount || 0,
+      createdAt: Date.now()
+    };
+    
+    await new Promise((resolve, reject) => {
+      const request = store.put(storedOperation);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+    
+    // Update pending count
+    await this.updatePendingCount(operation.namespace);
+  }
+
+  async applyOperationOptimistically(operation) {
+    if (!this.db) return;
+    
+    const transaction = this.db.transaction(['bookmarks', 'folders'], 'readwrite');
+    const bookmarksStore = transaction.objectStore('bookmarks');
+    const foldersStore = transaction.objectStore('folders');
+    const now = Date.now();
+    
+    try {
+      switch (operation.type) {
+        case 'CREATE_BOOKMARK': {
+          const bookmark = {
+            id: operation.payload.id,
+            name: operation.payload.name,
+            url: operation.payload.url,
+            parentId: operation.payload.parentId,
+            isFavorite: operation.payload.isFavorite || false,
+            namespace: operation.namespace,
+            isTemporary: operation.payload.id.toString().startsWith('temp_'),
+            createdAt: now,
+            updatedAt: now
+          };
+          await new Promise((resolve, reject) => {
+            const request = bookmarksStore.put(bookmark);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+          });
+          break;
+        }
+        
+        case 'CREATE_FOLDER': {
+          const folder = {
+            id: operation.payload.id,
+            name: operation.payload.name,
+            parentId: operation.payload.parentId,
+            isOpen: false,
+            namespace: operation.namespace,
+            isTemporary: operation.payload.id.toString().startsWith('temp_'),
+            createdAt: now,
+            updatedAt: now
+          };
+          await new Promise((resolve, reject) => {
+            const request = foldersStore.put(folder);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+          });
+          break;
+        }
+        
+        case 'UPDATE_BOOKMARK': {
+          // Get existing bookmark and update it
+          const existing = await new Promise((resolve, reject) => {
+            const request = bookmarksStore.get(operation.payload.id);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          
+          if (existing) {
+            const updated = {
+              ...existing,
+              ...(operation.payload.name !== undefined && { name: operation.payload.name }),
+              ...(operation.payload.url !== undefined && { url: operation.payload.url }),
+              ...(operation.payload.isFavorite !== undefined && { isFavorite: operation.payload.isFavorite }),
+              updatedAt: now
+            };
+            
+            await new Promise((resolve, reject) => {
+              const request = bookmarksStore.put(updated);
+              request.onsuccess = () => resolve();
+              request.onerror = () => reject(request.error);
+            });
+          }
+          break;
+        }
+        
+        case 'UPDATE_FOLDER': {
+          // Get existing folder and update it
+          const existing = await new Promise((resolve, reject) => {
+            const request = foldersStore.get(operation.payload.id);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          
+          if (existing) {
+            const updated = {
+              ...existing,
+              ...(operation.payload.name !== undefined && { name: operation.payload.name }),
+              ...(operation.payload.isOpen !== undefined && { isOpen: operation.payload.isOpen }),
+              updatedAt: now
+            };
+            
+            await new Promise((resolve, reject) => {
+              const request = foldersStore.put(updated);
+              request.onsuccess = () => resolve();
+              request.onerror = () => reject(request.error);
+            });
+          }
+          break;
+        }
+        
+        case 'DELETE_ITEM': {
+          // Try deleting from both stores
+          await Promise.all([
+            new Promise((resolve) => {
+              const request = bookmarksStore.delete(operation.payload.id);
+              request.onsuccess = () => resolve();
+              request.onerror = () => resolve(); // Don't fail if not found
+            }),
+            new Promise((resolve) => {
+              const request = foldersStore.delete(operation.payload.id);
+              request.onsuccess = () => resolve();
+              request.onerror = () => resolve(); // Don't fail if not found
+            })
+          ]);
+          break;
+        }
+        
+        case 'MOVE_ITEM': {
+          // Update parentId for both bookmarks and folders
+          const updateParent = async (store) => {
+            const existing = await new Promise((resolve, reject) => {
+              const request = store.get(operation.payload.id);
+              request.onsuccess = () => resolve(request.result);
+              request.onerror = () => reject(request.error);
+            });
+            
+            if (existing) {
+              const updated = {
+                ...existing,
+                parentId: operation.payload.newParentId,
+                updatedAt: now
+              };
+              
+              await new Promise((resolve, reject) => {
+                const request = store.put(updated);
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+              });
+            }
+          };
+          
+          // Try updating in both stores
+          try { await updateParent(bookmarksStore); } catch {}
+          try { await updateParent(foldersStore); } catch {}
+          break;
+        }
+      }
+    } catch (error) {
+      console.error('Error applying operation optimistically:', error);
+    }
+  }
+
+  scheduleBatchSync(namespace) {
+    // Clear existing timeout
+    if (this.batchTimeouts.has(namespace)) {
+      clearTimeout(this.batchTimeouts.get(namespace));
+    }
+    
+    // Schedule new batch
+    const timeout = setTimeout(() => {
+      this.batchTimeouts.delete(namespace);
+      this.syncNamespace(namespace);
+    }, this.syncConfig.batchWindow);
+    
+    this.batchTimeouts.set(namespace, timeout);
+  }
+
+  async syncNamespace(namespace) {
+    if (!this.isOnline) {
+      console.log(`Skipping sync for ${namespace} - offline`);
+      return;
+    }
+    
+    if (this.syncStatus.get(namespace) === 'syncing') {
+      console.log(`Already syncing ${namespace}`);
+      return;
+    }
+    
+    try {
+      this.syncStatus.set(namespace, 'syncing');
+      this.broadcastToNamespace(namespace, {
+        type: 'syncStatus',
+        data: { namespace, status: 'syncing' }
+      });
+      
+      // Get pending operations
+      const operations = await this.getPendingOperations(namespace);
+      
+      if (operations.length === 0) {
+        this.syncStatus.set(namespace, 'synced');
+        this.broadcastToNamespace(namespace, {
+          type: 'syncStatus',
+          data: { namespace, status: 'synced' }
+        });
+        return;
+      }
+      
+      console.log(`Syncing ${operations.length} operations for ${namespace}`);
+      
+      // Send to server
+      const response = await fetch(`/api/sync/${encodeURIComponent(namespace)}/operations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          clientId: this.clientId,
+          operations: operations
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      await this.processSyncResult(namespace, result);
+      
+      this.syncStatus.set(namespace, 'synced');
+      this.broadcastToNamespace(namespace, {
+        type: 'syncStatus',
+        data: { namespace, status: 'synced' }
+      });
+      
+    } catch (error) {
+      console.error(`Sync failed for ${namespace}:`, error);
+      this.syncStatus.set(namespace, 'error');
+      this.broadcastToNamespace(namespace, {
+        type: 'syncStatus',
+        data: { 
+          namespace, 
+          status: 'error',
+          error: error.message 
+        }
+      });
+      
+      // Schedule retry with exponential backoff
+      this.scheduleRetrySync(namespace);
+    }
+  }
+
+  async processSyncResult(namespace, result) {
+    if (!this.db) return;
+    
+    // Defensive programming: ensure result has expected structure
+    const { applied = [], updatedItems = [], mappings = {} } = result || {};
+    
+    console.log('Processing sync result:', { applied, updatedItems, mappings });
+    
+    // Mark operations as synced or failed
+    const syncedIds = [];
+    const failedIds = [];
+    
+    // Ensure applied is iterable
+    if (Array.isArray(applied)) {
+      for (const appliedOp of applied) {
+        if (appliedOp && appliedOp.operationId) {
+          if (appliedOp.status === 'success') {
+            syncedIds.push(appliedOp.operationId);
+          } else {
+            failedIds.push(appliedOp.operationId);
+          }
+        }
+      }
+    } else {
+      console.warn('Expected applied to be an array, got:', typeof applied, applied);
+    }
+    
+    // Update operation statuses
+    if (syncedIds.length > 0) {
+      await this.markOperationsSynced(syncedIds);
+    }
+    
+    if (failedIds.length > 0) {
+      await this.markOperationsFailed(failedIds);
+    }
+    
+    // Apply ID mappings if any
+    if (mappings && Object.keys(mappings).length > 0) {
+      await this.applyIdMappings(mappings);
+    }
+    
+    // Update pending count
+    await this.updatePendingCount(namespace);
+    
+    // Notify tabs about data changes
+    this.broadcastToNamespace(namespace, {
+      type: 'dataChanged',
+      data: { namespace }
+    });
+  }
+
+  async getPendingOperations(namespace) {
+    if (!this.db) return [];
+    
+    const transaction = this.db.transaction(['operations'], 'readonly');
+    const store = transaction.objectStore('operations');
+    const index = store.index('namespace');
+    
+    return new Promise((resolve, reject) => {
+      const operations = [];
+      const request = index.openCursor(IDBKeyRange.only(namespace));
+      
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          const op = cursor.value;
+          if (op.status === 'pending') {
+            operations.push({
+              id: op.id,
+              clientId: op.clientId,
+              namespace: op.namespace,
+              type: op.type,
+              payload: JSON.parse(op.payload),
+              clientCreatedAt: op.clientCreatedAt,
+              status: op.status,
+              retryCount: op.retryCount
+            });
+          }
+          cursor.continue();
+        } else {
+          // Sort by creation time
+          operations.sort((a, b) => a.clientCreatedAt - b.clientCreatedAt);
+          resolve(operations);
+        }
+      };
+      
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getPendingCount(namespace) {
+    if (!this.db) return 0;
+    
+    const transaction = this.db.transaction(['operations'], 'readonly');
+    const store = transaction.objectStore('operations');
+    const index = store.index('namespace');
+    
+    return new Promise((resolve, reject) => {
+      let count = 0;
+      const request = index.openCursor(IDBKeyRange.only(namespace));
+      
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          if (cursor.value.status === 'pending') {
+            count++;
+          }
+          cursor.continue();
+        } else {
+          resolve(count);
+        }
+      };
+      
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async markOperationsSynced(operationIds) {
+    if (!this.db || operationIds.length === 0) return;
+    
+    const transaction = this.db.transaction(['operations'], 'readwrite');
+    const store = transaction.objectStore('operations');
+    
+    for (const id of operationIds) {
+      const request = store.get(id);
+      request.onsuccess = () => {
+        const operation = request.result;
+        if (operation) {
+          operation.status = 'synced';
+          store.put(operation);
+        }
+      };
+    }
+  }
+
+  async markOperationsFailed(operationIds) {
+    if (!this.db || operationIds.length === 0) return;
+    
+    const transaction = this.db.transaction(['operations'], 'readwrite');
+    const store = transaction.objectStore('operations');
+    
+    for (const id of operationIds) {
+      const request = store.get(id);
+      request.onsuccess = () => {
+        const operation = request.result;
+        if (operation) {
+          operation.status = 'failed';
+          operation.retryCount = (operation.retryCount || 0) + 1;
+          store.put(operation);
+        }
+      };
+    }
+  }
+
+  async applyIdMappings(mappings) {
+    if (!this.db || !mappings) return;
+    
+    const transaction = this.db.transaction(['bookmarks', 'folders', 'operations'], 'readwrite');
+    const bookmarksStore = transaction.objectStore('bookmarks');
+    const foldersStore = transaction.objectStore('folders');
+    const operationsStore = transaction.objectStore('operations');
+    
+    for (const [tempId, realId] of Object.entries(mappings)) {
+      // Update bookmarks
+      const bookmarkRequest = bookmarksStore.get(tempId);
+      bookmarkRequest.onsuccess = () => {
+        const bookmark = bookmarkRequest.result;
+        if (bookmark) {
+          bookmarksStore.delete(tempId);
+          bookmark.id = realId;
+          bookmark.isTemporary = false;
+          bookmarksStore.put(bookmark);
+        }
+      };
+      
+      // Update folders
+      const folderRequest = foldersStore.get(tempId);
+      folderRequest.onsuccess = () => {
+        const folder = folderRequest.result;
+        if (folder) {
+          foldersStore.delete(tempId);
+          folder.id = realId;
+          folder.isTemporary = false;
+          foldersStore.put(folder);
+        }
+      };
+      
+      // Update operations that reference this ID
+      const operationRequest = operationsStore.getAll();
+      operationRequest.onsuccess = () => {
+        const operations = operationRequest.result;
+        for (const op of operations) {
+          const payload = JSON.parse(op.payload);
+          let changed = false;
+          
+          if (payload.id === tempId) {
+            payload.id = realId;
+            changed = true;
+          }
+          if (payload.parentId === tempId) {
+            payload.parentId = realId;
+            changed = true;
+          }
+          
+          if (changed) {
+            op.payload = JSON.stringify(payload);
+            operationsStore.put(op);
+          }
+        }
+      };
+    }
+  }
+
+  async updatePendingCount(namespace) {
+    const count = await this.getPendingCount(namespace);
+    
+    // Broadcast to namespace tabs
+    this.broadcastToNamespace(namespace, {
+      type: 'pendingCount',
+      data: { namespace, count }
+    });
+    
+    // Update sync meta
+    if (this.db) {
+      const transaction = this.db.transaction(['syncMeta'], 'readwrite');
+      const store = transaction.objectStore('syncMeta');
+      
+      const request = store.get(namespace);
+      request.onsuccess = () => {
+        const meta = request.result || { namespace };
+        meta.lastSyncTimestamp = Date.now();
+        meta.pendingOperationsCount = count;
+        meta.clientId = this.clientId;
+        store.put(meta);
+      };
+    }
+  }
+
+  scheduleRetrySync(namespace) {
+    // Simple retry logic - exponential backoff based on failed sync attempts
+    const retryCount = this.retryAttempts?.get(namespace) || 0;
+    const delay = this.syncConfig.retryDelays[Math.min(retryCount, this.syncConfig.retryDelays.length - 1)];
+    
+    if (!this.retryAttempts) this.retryAttempts = new Map();
+    this.retryAttempts.set(namespace, retryCount + 1);
+    
+    setTimeout(() => {
+      if (this.isOnline) {
+        this.syncNamespace(namespace);
+      }
+    }, delay);
+  }
+
+  broadcastToAllPorts(message) {
+    for (const port of this.connectedPorts.values()) {
+      this.sendToPort(port, message);
+    }
+  }
+
+  // Database operation methods
+  async getNamespaceItems(namespace) {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const transaction = this.db.transaction(['bookmarks', 'folders'], 'readonly');
+    const bookmarksStore = transaction.objectStore('bookmarks');
+    const foldersStore = transaction.objectStore('folders');
+    
+    // Get all bookmarks and folders for this namespace
+    const [bookmarks, folders] = await Promise.all([
+      this.getAllFromStore(bookmarksStore, 'namespace', namespace),
+      this.getAllFromStore(foldersStore, 'namespace', namespace)
+    ]);
+    
+    // Combine and sort by creation time
+    return [...bookmarks, ...folders].sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  async applyOperationOptimistically(operation) {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const now = Date.now();
+    const transaction = this.db.transaction(['bookmarks', 'folders'], 'readwrite');
+    
+    switch (operation.type) {
+      case 'CREATE_BOOKMARK': {
+        const payload = operation.payload;
+        const bookmark = {
+          id: payload.id,
+          name: payload.name,
+          url: payload.url,
+          parentId: payload.parentId,
+          isFavorite: payload.isFavorite || false,
+          namespace: operation.namespace,
+          isTemporary: payload.id.toString().startsWith('temp_'),
+          createdAt: now,
+          updatedAt: now
+        };
+        await this.putInStore(transaction.objectStore('bookmarks'), bookmark);
+        break;
+      }
+
+      case 'CREATE_FOLDER': {
+        const payload = operation.payload;
+        const folder = {
+          id: payload.id,
+          name: payload.name,
+          parentId: payload.parentId,
+          isOpen: false,
+          namespace: operation.namespace,
+          isTemporary: payload.id.toString().startsWith('temp_'),
+          createdAt: now,
+          updatedAt: now
+        };
+        await this.putInStore(transaction.objectStore('folders'), folder);
+        break;
+      }
+
+      case 'UPDATE_BOOKMARK': {
+        const payload = operation.payload;
+        const bookmarksStore = transaction.objectStore('bookmarks');
+        const existing = await this.getFromStore(bookmarksStore, payload.id);
+        if (existing) {
+          const updated = {
+            ...existing,
+            ...(payload.name !== undefined && { name: payload.name }),
+            ...(payload.url !== undefined && { url: payload.url }),
+            ...(payload.isFavorite !== undefined && { isFavorite: payload.isFavorite }),
+            updatedAt: now
+          };
+          await this.putInStore(bookmarksStore, updated);
+        }
+        break;
+      }
+
+      case 'UPDATE_FOLDER': {
+        const payload = operation.payload;
+        const foldersStore = transaction.objectStore('folders');
+        const existing = await this.getFromStore(foldersStore, payload.id);
+        if (existing) {
+          const updated = {
+            ...existing,
+            ...(payload.name !== undefined && { name: payload.name }),
+            ...(payload.isOpen !== undefined && { isOpen: payload.isOpen }),
+            updatedAt: now
+          };
+          await this.putInStore(foldersStore, updated);
+        }
+        break;
+      }
+
+      case 'DELETE_ITEM': {
+        const payload = operation.payload;
+        // Try deleting from both stores
+        await Promise.all([
+          this.deleteFromStore(transaction.objectStore('bookmarks'), payload.id),
+          this.deleteFromStore(transaction.objectStore('folders'), payload.id)
+        ]);
+        break;
+      }
+
+      case 'MOVE_ITEM': {
+        const payload = operation.payload;
+        // Try updating both stores
+        const bookmarksStore = transaction.objectStore('bookmarks');
+        const foldersStore = transaction.objectStore('folders');
+        
+        const [bookmark, folder] = await Promise.all([
+          this.getFromStore(bookmarksStore, payload.id),
+          this.getFromStore(foldersStore, payload.id)
+        ]);
+
+        if (bookmark) {
+          await this.putInStore(bookmarksStore, {
+            ...bookmark,
+            parentId: payload.newParentId,
+            updatedAt: now
+          });
+        }
+
+        if (folder) {
+          await this.putInStore(foldersStore, {
+            ...folder,
+            parentId: payload.newParentId,
+            updatedAt: now
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  async getItemById(namespace, id) {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const transaction = this.db.transaction(['bookmarks', 'folders'], 'readonly');
+    const [bookmark, folder] = await Promise.all([
+      this.getFromStore(transaction.objectStore('bookmarks'), id),
+      this.getFromStore(transaction.objectStore('folders'), id)
+    ]);
+
+    if (bookmark && bookmark.namespace === namespace) {
+      return {
+        id: typeof bookmark.id === 'string' ? parseInt(bookmark.id) || -1 : bookmark.id,
+        type: 'bookmark',
+        namespace: bookmark.namespace,
+        parentId: bookmark.parentId || null,
+        prevSiblingId: null,
+        nextSiblingId: null,
+        createdAt: bookmark.createdAt,
+        updatedAt: bookmark.updatedAt,
+        title: bookmark.name,
+        url: bookmark.url,
+        favorite: bookmark.isFavorite
+      };
+    }
+
+    if (folder && folder.namespace === namespace) {
+      return {
+        id: typeof folder.id === 'string' ? parseInt(folder.id) || -1 : folder.id,
+        type: 'folder',
+        namespace: folder.namespace,
+        parentId: folder.parentId || null,
+        prevSiblingId: null,
+        nextSiblingId: null,
+        createdAt: folder.createdAt,
+        updatedAt: folder.updatedAt,
+        name: folder.name,
+        open: folder.isOpen,
+        children: []
+      };
+    }
+
+    return null;
+  }
+
+  async reconcileWithServerState(namespace, serverItems) {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const transaction = this.db.transaction(['bookmarks', 'folders'], 'readwrite');
+    const bookmarksStore = transaction.objectStore('bookmarks');
+    const foldersStore = transaction.objectStore('folders');
+    
+    // Clear existing non-temporary items for this namespace
+    const bookmarks = await this.getAllFromStore(bookmarksStore, 'namespace', namespace);
+    const folders = await this.getAllFromStore(foldersStore, 'namespace', namespace);
+    
+    for (const bookmark of bookmarks) {
+      if (!bookmark.isTemporary) {
+        await this.deleteFromStore(bookmarksStore, bookmark.id);
+      }
+    }
+    
+    for (const folder of folders) {
+      if (!folder.isTemporary) {
+        await this.deleteFromStore(foldersStore, folder.id);
+      }
+    }
+
+    // Add server items
+    const now = Date.now();
+    for (const item of serverItems) {
+      if (item.type === 'bookmark') {
+        const bookmark = {
+          id: item.id,
+          name: item.title || '',
+          url: item.url || '',
+          parentId: item.parentId || undefined,
+          isFavorite: item.favorite || false,
+          namespace,
+          isTemporary: false,
+          createdAt: now,
+          updatedAt: now
+        };
+        await this.putInStore(bookmarksStore, bookmark);
+      } else if (item.type === 'folder') {
+        const folder = {
+          id: item.id,
+          name: item.name || '',
+          parentId: item.parentId || undefined,
+          isOpen: item.open || false,
+          namespace,
+          isTemporary: false,
+          createdAt: now,
+          updatedAt: now
+        };
+        await this.putInStore(foldersStore, folder);
+      }
+    }
+  }
+
+  // Fetch initial server data for fresh sessions
+  async fetchInitialServerData(namespace) {
+    if (!this.isOnline) {
+      console.log('Offline - skipping initial server data fetch');
+      return;
+    }
+
+    try {
+      console.log(`Fetching initial server data for namespace: ${namespace}`);
+      
+      const response = await fetch(`/api/bookmarks/${encodeURIComponent(namespace)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        console.log(`Received ${result.data.length} items from server for namespace: ${namespace}`);
+        
+        // Convert server data to local format and reconcile
+        const serverItems = result.data.map(item => ({
+          id: item.id,
+          type: item.type,
+          namespace: item.namespace,
+          parentId: item.parentId,
+          prevSiblingId: item.prevSiblingId,
+          nextSiblingId: item.nextSiblingId,
+          createdAt: item.createdAt || Date.now(),
+          updatedAt: item.updatedAt || Date.now(),
+          ...(item.type === 'bookmark' ? {
+            title: item.title,
+            url: item.url,
+            favorite: item.favorite
+          } : {
+            name: item.name,
+            open: item.open
+          })
+        }));
+
+        // Reconcile with local storage
+        await this.reconcileWithServerState(namespace, serverItems);
+        
+        // Update last sync timestamp
+        await this.updateLastSync(namespace);
+        
+        console.log(`Initial sync completed for namespace: ${namespace}`);
+        
+        // Notify tabs about the initial data
+        this.broadcastToNamespace(namespace, {
+          type: 'initialDataLoaded',
+          data: { namespace, itemCount: serverItems.length }
+        });
+      }
+    } catch (error) {
+      console.error(`Failed to fetch initial server data for namespace ${namespace}:`, error);
+      
+      // Notify tabs about the failure
+      this.broadcastToNamespace(namespace, {
+        type: 'initialDataError',
+        data: { namespace, error: error.message }
+      });
+    }
+  }
+
+  async updateLastSync(namespace) {
+    if (!this.db) return;
+    
+    const transaction = this.db.transaction(['syncMeta'], 'readwrite');
+    const store = transaction.objectStore('syncMeta');
+    
+    const existing = await this.getFromStore(store, namespace);
+    await this.putInStore(store, {
+      namespace,
+      lastSyncTimestamp: Date.now(),
+      pendingOperationsCount: existing?.pendingOperationsCount || 0,
+      clientId: this.clientId
+    });
+  }
+
+  // Helper methods for IndexedDB operations
+  async getFromStore(store, key) {
+    return new Promise((resolve, reject) => {
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async putInStore(store, value) {
+    return new Promise((resolve, reject) => {
+      const request = store.put(value);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteFromStore(store, key) {
+    return new Promise((resolve, reject) => {
+      const request = store.delete(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getAllFromStore(store, indexName, value) {
+    return new Promise((resolve, reject) => {
+      const index = store.index(indexName);
+      const request = index.getAll(value);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
   }
 }
 

@@ -255,6 +255,116 @@ export class BookmarkService {
     await db.delete(nodes).where(eq(nodes.id, itemId));
   }
 
+  // === SYNC-SPECIFIC METHODS ===
+  
+  // Find item by temp ID (for operation idempotency)
+  async findByTempId(namespace: string, tempId: string): Promise<BookmarkItem | null> {
+    // In this implementation, we'll store temp IDs in the database temporarily
+    // You might want to add a tempId column to the nodes table or use a separate mapping table
+    // For now, we'll check if an item was recently created with matching properties
+    return null; // TODO: Implement proper temp ID tracking
+  }
+
+  // Enhanced create folder with temp ID tracking
+  async createFolderWithTempId(namespace: string, data: {
+    name: string;
+    parentId?: number | null;
+    tempId?: string;
+  }): Promise<BookmarkItem> {
+    return this.createFolder(namespace, data.name, data.parentId || undefined);
+  }
+
+  // Enhanced create bookmark with temp ID tracking
+  async createBookmarkWithTempId(namespace: string, data: {
+    title: string;
+    url: string;
+    parentId?: number | null;
+    favorite?: boolean;
+    tempId?: string;
+  }): Promise<BookmarkItem> {
+    const bookmark = await this.createBookmark(
+      namespace, 
+      data.title, 
+      data.url, 
+      undefined, 
+      data.parentId || undefined
+    );
+
+    // Set favorite if requested
+    if (data.favorite) {
+      await this.toggleBookmarkFavorite(bookmark.id);
+      bookmark.favorite = true;
+    }
+
+    return bookmark;
+  }
+
+  // Generic update method for items
+  async updateItem(namespace: string, itemId: number, updates: {
+    name?: string;
+    title?: string;
+    url?: string;
+    favorite?: boolean;
+    open?: boolean;
+  }): Promise<void> {
+    const item = await db.select().from(nodes).where(eq(nodes.id, itemId)).get();
+    if (!item) throw new Error('Item not found');
+
+    // Update based on item type
+    if (item.type === 'folder') {
+      if (updates.name !== undefined) {
+        await db.update(folders)
+          .set({ name: updates.name })
+          .where(eq(folders.nodeId, itemId));
+      }
+      
+      if (updates.open !== undefined) {
+        // Update or insert folder state
+        const currentState = await db.select()
+          .from(folderState)
+          .where(and(
+            eq(folderState.namespace, namespace),
+            eq(folderState.nodeId, itemId)
+          ))
+          .get();
+
+        if (currentState) {
+          await db.update(folderState)
+            .set({ 
+              open: updates.open,
+              updatedAt: Math.floor(Date.now() / 1000)
+            })
+            .where(and(
+              eq(folderState.namespace, namespace),
+              eq(folderState.nodeId, itemId)
+            ));
+        } else {
+          await db.insert(folderState).values({
+            namespace,
+            nodeId: itemId,
+            open: updates.open,
+          });
+        }
+      }
+    } else if (item.type === 'bookmark') {
+      const bookmarkUpdates: any = {};
+      if (updates.title !== undefined) bookmarkUpdates.title = updates.title;
+      if (updates.url !== undefined) bookmarkUpdates.url = updates.url;
+      if (updates.favorite !== undefined) bookmarkUpdates.favorite = updates.favorite;
+
+      if (Object.keys(bookmarkUpdates).length > 0) {
+        await db.update(bookmarks)
+          .set(bookmarkUpdates)
+          .where(eq(bookmarks.nodeId, itemId));
+      }
+    }
+
+    // Update the node's timestamp
+    await db.update(nodes)
+      .set({ updatedAt: Math.floor(Date.now() / 1000) })
+      .where(eq(nodes.id, itemId));
+  }
+
   // Helper methods
   private findTailSibling(tx: any, namespace: string, parentId?: number) {
     const whereClause = parentId 
