@@ -9,6 +9,44 @@ interface BookmarkManagerProps {
   namespace: string;
 }
 
+// Helper function to safely extract event data
+function extractEventData(data: unknown): Record<string, unknown> | null {
+  if (data && typeof data === 'object' && data !== null) {
+    const obj = data as Record<string, unknown>;
+    return obj.data as Record<string, unknown> || obj;
+  }
+  return null;
+}
+
+// Type guards for event data
+function isBookmarkItem(obj: unknown): obj is BookmarkItem {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const item = obj as Record<string, unknown>;
+  return typeof item.id === 'number' &&
+         typeof item.type === 'string' &&
+         ['folder', 'bookmark'].includes(item.type as string);
+}
+
+function isToggleData(obj: unknown): obj is { folderId: number; open: boolean } {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const data = obj as Record<string, unknown>;
+  return typeof data.folderId === 'number' &&
+         typeof data.open === 'boolean';
+}
+
+function isFavoriteData(obj: unknown): obj is { bookmarkId: number; favorite: boolean } {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const data = obj as Record<string, unknown>;
+  return typeof data.bookmarkId === 'number' &&
+         typeof data.favorite === 'boolean';
+}
+
+function isDeleteData(obj: unknown): obj is { itemId: number } {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const data = obj as Record<string, unknown>;
+  return typeof data.itemId === 'number';
+}
+
 export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   const [items, setItems] = useState<BookmarkItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,12 +88,60 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     if (latestMessage.namespace === namespace) {
       switch (latestMessage.type) {
         case 'folder_created':
-        case 'bookmark_created':
+        case 'bookmark_created': {
+          const eventData = extractEventData(latestMessage.data);
+          if (eventData && isBookmarkItem(eventData)) {
+            // Check if item already exists (from optimistic update)
+            setItems(prevItems => {
+              const exists = prevItems.some(item => item.id === eventData.id);
+              return exists ? prevItems : [...prevItems, eventData];
+            });
+          }
+          break;
+        }
+          
+        case 'folder_toggled': {
+          const eventData = extractEventData(latestMessage.data);
+          if (eventData && isToggleData(eventData)) {
+            // Always apply toggle events as they might come from other clients
+            setItems(prevItems => 
+              prevItems.map(item => 
+                item.id === eventData.folderId && item.type === 'folder' 
+                  ? { ...item, open: eventData.open } 
+                  : item
+              )
+            );
+          }
+          break;
+        }
+          
+        case 'bookmark_favorite_toggled': {
+          const eventData = extractEventData(latestMessage.data);
+          if (eventData && isFavoriteData(eventData)) {
+            // Always apply favorite events as they might come from other clients
+            setItems(prevItems => 
+              prevItems.map(item => 
+                item.id === eventData.bookmarkId && item.type === 'bookmark' 
+                  ? { ...item, favorite: eventData.favorite } 
+                  : item
+              )
+            );
+          }
+          break;
+        }
+          
+        case 'item_deleted': {
+          const eventData = extractEventData(latestMessage.data);
+          if (eventData && isDeleteData(eventData)) {
+            // Always apply delete events as they might come from other clients
+            setItems(prevItems => prevItems.filter(item => item.id !== eventData.itemId));
+          }
+          break;
+        }
+          
         case 'item_moved':
-        case 'folder_toggled':
-        case 'bookmark_favorite_toggled':
-        case 'item_deleted':
-          loadItems(); // Reload all items when bookmark-related events occur
+          // For move operations, we'll still refetch since it's more complex
+          loadItems();
           break;
       }
     }
@@ -66,10 +152,12 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     if (!folderName.trim()) return;
 
     try {
-      await bookmarkAPI.createFolder(namespace, { name: folderName });
+      const newFolder = await bookmarkAPI.createFolder(namespace, { name: folderName });
       setFolderName('');
       setShowAddForm(null);
-      // Items will be reloaded via SSE
+      
+      // Optimistically add the folder to UI immediately
+      setItems(prevItems => [...prevItems, newFolder]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create folder');
     }
@@ -80,7 +168,7 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     if (!bookmarkTitle.trim() || !bookmarkUrl.trim()) return;
 
     try {
-      await bookmarkAPI.createBookmark(namespace, {
+      const newBookmark = await bookmarkAPI.createBookmark(namespace, {
         title: bookmarkTitle,
         url: bookmarkUrl,
         icon: bookmarkIcon || undefined,
@@ -89,7 +177,9 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
       setBookmarkUrl('');
       setBookmarkIcon('');
       setShowAddForm(null);
-      // Items will be reloaded via SSE
+      
+      // Optimistically add the bookmark to UI immediately
+      setItems(prevItems => [...prevItems, newBookmark]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create bookmark');
     }
@@ -97,18 +187,50 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
 
   const handleToggleFolder = async (folderId: number) => {
     try {
+      // Optimistically update the UI first
+      setItems(prevItems => 
+        prevItems.map(item => 
+          item.id === folderId && item.type === 'folder' 
+            ? { ...item, open: !item.open } 
+            : item
+        )
+      );
+      
       await bookmarkAPI.toggleFolderState(namespace, folderId);
-      // Items will be reloaded via SSE
     } catch (err) {
+      // Revert the optimistic update on error
+      setItems(prevItems => 
+        prevItems.map(item => 
+          item.id === folderId && item.type === 'folder' 
+            ? { ...item, open: !item.open } 
+            : item
+        )
+      );
       setError(err instanceof Error ? err.message : 'Failed to toggle folder');
     }
   };
 
   const handleToggleFavorite = async (bookmarkId: number) => {
     try {
+      // Optimistically update the UI first
+      setItems(prevItems => 
+        prevItems.map(item => 
+          item.id === bookmarkId && item.type === 'bookmark' 
+            ? { ...item, favorite: !item.favorite } 
+            : item
+        )
+      );
+      
       await bookmarkAPI.toggleBookmarkFavorite(namespace, bookmarkId);
-      // Items will be reloaded via SSE
     } catch (err) {
+      // Revert the optimistic update on error
+      setItems(prevItems => 
+        prevItems.map(item => 
+          item.id === bookmarkId && item.type === 'bookmark' 
+            ? { ...item, favorite: !item.favorite } 
+            : item
+        )
+      );
       setError(err instanceof Error ? err.message : 'Failed to toggle favorite');
     }
   };
@@ -116,10 +238,17 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   const handleDeleteItem = async (itemId: number) => {
     if (!confirm('Are you sure you want to delete this item?')) return;
 
+    // Store original items before optimistic update
+    const originalItems = items;
+    
     try {
+      // Optimistically remove the item from UI first
+      setItems(prevItems => prevItems.filter(item => item.id !== itemId));
+      
       await bookmarkAPI.deleteItem(namespace, itemId);
-      // Items will be reloaded via SSE
     } catch (err) {
+      // Revert the optimistic update on error
+      setItems(originalItems);
       setError(err instanceof Error ? err.message : 'Failed to delete item');
     }
   };
