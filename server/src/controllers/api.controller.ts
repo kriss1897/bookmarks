@@ -1,14 +1,14 @@
 import { Request, Response } from 'express';
-import { IEventPublisher, ISSEManager, EventType } from '../types/events.js';
+import { IEventPublisher, IEventsManager, EventType } from '../types/events.js';
 
 /**
- * API Route Handlers following Single Responsibility Principle
+ * API Controller following Single Responsibility Principle
  * Each handler is responsible for one specific API endpoint
  */
-export class APIRoutes {
+export class APIController {
   constructor(
     private eventPublisher: IEventPublisher,
-    private sseManager?: ISSEManager
+    private sseManager?: IEventsManager
   ) {}
 
   /**

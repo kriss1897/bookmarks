@@ -1,11 +1,11 @@
-import { IEventPublisher, ISSEManager, EventType, SSEEvent } from '../types/events.js';
+import { IEventPublisher, IEventsManager, EventType, SSEEvent } from '../types/events.js';
 
 /**
  * Event Publisher following Single Responsibility Principle
  * Responsible only for publishing events to the SSE manager
  */
 export class EventPublisher implements IEventPublisher {
-  constructor(private sseManager: ISSEManager) {}
+  constructor(private eventsManager: IEventsManager) {}
 
   /**
    * Publish an event to all connected clients
@@ -23,8 +23,8 @@ export class EventPublisher implements IEventPublisher {
       timestamp: new Date().toISOString()
     };
 
-    console.log(`Publishing event: ${eventType} to ${this.sseManager.getConnectionCount()} clients`);
-    this.sseManager.broadcastEvent(event);
+    console.log(`Publishing event: ${eventType} to ${this.eventsManager.getConnectionCount()} clients`);
+    this.eventsManager.broadcastEvent(event);
   }
 
   /**
@@ -44,7 +44,7 @@ export class EventPublisher implements IEventPublisher {
     };
 
     console.log(`Publishing event to namespace "${namespace}": ${data.type}`);
-    this.sseManager.broadcastToNamespace(namespace, event);
+    this.eventsManager.broadcastToNamespace(namespace, event);
   }
 
   /**

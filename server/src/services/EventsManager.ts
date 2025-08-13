@@ -1,11 +1,11 @@
-import { IEventsManager, SSEConnection, SSEEvent, EventType } from '../types/events.js';
+import { IEventsManager, EventsConnection, SSEEvent, EventType } from '../types/events.js';
 
 /**
  * SSE Manager following Single Responsibility Principle
  * Responsible only for managing SSE connections and broadcasting events
  */
 export class EventsManager implements IEventsManager {
-  private connections: Map<number, SSEConnection> = new Map();
+  private connections: Map<number, EventsConnection> = new Map();
   private namespaceConnections: Map<string, Set<number>> = new Map(); // Track connections by namespace
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private connectionCleanupInterval: NodeJS.Timeout | null = null;
@@ -20,7 +20,7 @@ export class EventsManager implements IEventsManager {
   /**
    * Add a new SSE connection
    */
-  addConnection(connection: SSEConnection): void {
+  addConnection(connection: EventsConnection): void {
     this.connections.set(connection.clientId, connection);
     
     // Add to namespace tracking
@@ -211,7 +211,7 @@ export class EventsManager implements IEventsManager {
   /**
    * Send event to a specific connection
    */
-  private sendToConnection(connection: SSEConnection, event: SSEEvent): void {
+  private sendToConnection(connection: EventsConnection, event: SSEEvent): void {
     const response = connection.response;
     const sseData = `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
     response.write(sseData);

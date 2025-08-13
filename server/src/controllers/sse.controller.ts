@@ -2,10 +2,10 @@ import { Request, Response } from 'express';
 import { IEventsManager, SSEConnection } from '../types/events.js';
 
 /**
- * SSE Route Handler following Single Responsibility Principle
+ * SSE Controller following Single Responsibility Principle
  * Responsible only for handling SSE connection setup
  */
-export class SSERoutes {
+export class SSEController {
   private clientCounter = 0;
 
   constructor(private sseManager: IEventsManager) {}

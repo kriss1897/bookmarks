@@ -9,7 +9,7 @@ export interface SSEEvent {
   namespace?: string; // Optional namespace for targeted events
 }
 
-export interface SSEConnection {
+export interface EventsConnection {
   id: string;
   response: Response;
   clientId: number;
@@ -38,7 +38,7 @@ export interface IEventPublisher {
 
 // Interface for Events manager (Dependency Inversion Principle)
 export interface IEventsManager {
-  addConnection(connection: SSEConnection): void;
+  addConnection(connection: EventsConnection): void;
   removeConnection(clientId: number): void;
   broadcastEvent(event: SSEEvent): void;
   broadcastToNamespace(namespace: string, event: SSEEvent): void;

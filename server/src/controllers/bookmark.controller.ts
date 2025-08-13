@@ -4,7 +4,7 @@ import { EventPublisher } from '../services/EventPublisher.js';
 import { db } from '../db/connection.js';
 import { nodes, folders } from '../db/schema.js';
 
-export class BookmarkRoutes {
+export class BookmarkController {
   private bookmarkService: BookmarkService;
   private eventPublisher: EventPublisher;
 
