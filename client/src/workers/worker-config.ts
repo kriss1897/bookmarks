@@ -15,7 +15,7 @@ export const SYNC_CONFIG = {
 
 export const DATABASE_CONFIG = {
   name: 'BookmarksOfflineDB',
-  version: 20250813
+  version: 20250814 // Updated to trigger schema change for incremental loading
 } as const;
 
 export const REACHABILITY_CONFIG = {

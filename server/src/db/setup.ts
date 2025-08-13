@@ -25,14 +25,14 @@ export async function setupDatabase(dbPath?: string): Promise<void> {
   console.log('🚀 Starting database setup...');
   console.log(`📄 Database path: ${databasePath}`);
 
-  // Create or recreate database with UUID schema
+  // Create or recreate database
   await createDatabase(databasePath);
 
   console.log('🎉 Database setup completed successfully!');
 }
 
 async function createDatabase(dbPath: string): Promise<void> {
-  console.log('🆕 Creating database with UUID schema...');
+  console.log('🆕 Creating database');
   
   const sqlite = new Database(dbPath);
   
@@ -40,7 +40,7 @@ async function createDatabase(dbPath: string): Promise<void> {
   sqlite.pragma('foreign_keys = ON');
   sqlite.pragma('journal_mode = WAL');
 
-  // Create tables with UUID schema (orderIndex-based ordering)
+  // Create tables
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS nodes (
       id TEXT PRIMARY KEY,
@@ -97,7 +97,7 @@ async function createDatabase(dbPath: string): Promise<void> {
   `);
 
   sqlite.close();
-  console.log('✅ Database created with UUID schema');
+  console.log('✅ Database created');
 }
 
 // CLI runner

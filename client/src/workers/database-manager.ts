@@ -86,9 +86,11 @@ export class DatabaseManager {
         // Create fresh stores
         const bookmarksStore = db.createObjectStore('bookmarks', { keyPath: 'id' });
         bookmarksStore.createIndex('namespace', 'namespace');
+        bookmarksStore.createIndex('by-namespace-parent', ['namespace', 'parentId']);
         
         const foldersStore = db.createObjectStore('folders', { keyPath: 'id' });
         foldersStore.createIndex('namespace', 'namespace');
+        foldersStore.createIndex('by-namespace-parent', ['namespace', 'parentId']);
         
         const operationsStore = db.createObjectStore('operations', { keyPath: 'id' });
         operationsStore.createIndex('namespace', 'namespace');
@@ -96,6 +98,10 @@ export class DatabaseManager {
         operationsStore.createIndex('clientCreatedAt', 'clientCreatedAt');
         
         db.createObjectStore('syncMeta', { keyPath: 'namespace' });
+        
+        // NEW: Create folder metadata store for tracking loaded children
+        const metadataStore = db.createObjectStore('folderMetadata', { keyPath: ['namespace', 'folderId'] });
+        metadataStore.createIndex('namespace', 'namespace');
         
         console.log('Database stores created successfully');
       };
@@ -458,6 +464,127 @@ export class DatabaseManager {
   private isUUID(id: string): boolean {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     return uuidRegex.test(id);
+  }
+
+  // === NEW METHODS FOR INCREMENTAL LOADING ===
+
+  // Store individual item
+    // Helper method to get all items from an index
+  private async getAllFromIndex<T>(store: IDBObjectStore, indexName: string, key: IDBValidKey): Promise<T[]> {
+    return new Promise((resolve, reject) => {
+      const index = store.index(indexName);
+      const request = index.getAll(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // NEW: Incremental loading database methods
+  async getRootItems(namespace: string): Promise<(StoredBookmark | StoredFolder)[]> {
+    if (!this.database) return [];
+    
+    const transaction = this.database.transaction(['bookmarks', 'folders'], 'readonly');
+    const bookmarksStore = transaction.objectStore('bookmarks');
+    const foldersStore = transaction.objectStore('folders');
+    
+    // Get all items for the namespace and filter for root items (parentId is null, undefined, or empty string)
+    const [allBookmarks, allFolders] = await Promise.all([
+      this.getAllFromIndex<StoredBookmark>(bookmarksStore, 'namespace', namespace),
+      this.getAllFromIndex<StoredFolder>(foldersStore, 'namespace', namespace)
+    ]);
+    
+    // Filter for root items (no parent)
+    const rootBookmarks = allBookmarks.filter(item => !item.parentId || item.parentId === '');
+    const rootFolders = allFolders.filter(item => !item.parentId || item.parentId === '');
+    
+    return [...rootBookmarks, ...rootFolders].sort((a, b) => 
+      (a.orderIndex || '').localeCompare(b.orderIndex || '')
+    );
+  }
+
+  async getFolderChildren(namespace: string, folderId: string): Promise<(StoredBookmark | StoredFolder)[]> {
+    if (!this.database) return [];
+    
+    const transaction = this.database.transaction(['bookmarks', 'folders'], 'readonly');
+    const bookmarksStore = transaction.objectStore('bookmarks');
+    const foldersStore = transaction.objectStore('folders');
+    
+    const [bookmarks, folders] = await Promise.all([
+      this.getAllFromIndex<StoredBookmark>(bookmarksStore, 'by-namespace-parent', [namespace, folderId]),
+      this.getAllFromIndex<StoredFolder>(foldersStore, 'by-namespace-parent', [namespace, folderId])
+    ]);
+    
+    return [...bookmarks, ...folders].sort((a, b) => 
+      (a.orderIndex || '').localeCompare(b.orderIndex || '')
+    );
+  }
+
+  async storeItem(namespace: string, item: ServerItem): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const transaction = this.db.transaction(['bookmarks', 'folders'], 'readwrite');
+    const now = Date.now();
+    
+    if (item.type === 'bookmark') {
+      const bookmarksStore = transaction.objectStore('bookmarks');
+      const bookmark: StoredBookmark = {
+        id: item.id,
+        name: item.title || '',
+        url: item.url || '',
+        parentId: item.parentId || undefined,
+        isFavorite: item.favorite || false,
+        namespace,
+        orderIndex: item.orderIndex || '',
+        createdAt: now,
+        updatedAt: now
+      };
+      await this.putInStore(bookmarksStore, bookmark);
+    } else if (item.type === 'folder') {
+      const foldersStore = transaction.objectStore('folders');
+      const folder: StoredFolder = {
+        id: item.id,
+        name: item.name || '',
+        parentId: item.parentId || undefined,
+        isOpen: item.open || false,
+        namespace,
+        orderIndex: item.orderIndex || '',
+        createdAt: now,
+        updatedAt: now
+      };
+      await this.putInStore(foldersStore, folder);
+    }
+  }
+
+  // Get folder metadata
+  async getFolderMetadata(namespace: string, folderId: string): Promise<{ hasLoadedChildren: boolean; lastLoadedAt: number; childrenCount: number } | null> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const transaction = this.db.transaction(['folderMetadata'], 'readonly');
+    const store = transaction.objectStore('folderMetadata');
+    
+    const result = await this.getFromStore(store, [namespace, folderId]) as { 
+      hasLoadedChildren: boolean; 
+      lastLoadedAt: number; 
+      childrenCount: number 
+    } | undefined;
+    
+    return result || null;
+  }
+
+  // Set folder metadata
+  async setFolderMetadata(namespace: string, folderId: string, metadata: { hasLoadedChildren: boolean; lastLoadedAt: number; childrenCount: number }): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const transaction = this.db.transaction(['folderMetadata'], 'readwrite');
+    const store = transaction.objectStore('folderMetadata');
+    
+    const record = {
+      namespace,
+      folderId,
+      ...metadata
+    };
+    
+    await this.putInStore(store, record);
   }
 
   get database(): IDBDatabase | null {

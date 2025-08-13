@@ -34,7 +34,89 @@ interface LocalDBFolder {
 }
 
 export class LocalDataService {
-  // Get all bookmarks for a namespace
+  // Get root items for a namespace
+  async getRootItems(namespace: string): Promise<LocalBookmarkItem[]> {
+    const items = await offlineWorkerService.getRootItems(namespace) as (LocalDBBookmark | LocalDBFolder)[];
+    
+    // Convert to BookmarkItem format
+    const bookmarkItems: LocalBookmarkItem[] = items.map((item: LocalDBBookmark | LocalDBFolder) => {
+      // Check if it's a bookmark by checking for url property
+      if ('url' in item && item.url) {
+        // It's a bookmark
+        const bookmark = item as LocalDBBookmark;
+        return {
+          id: bookmark.id,
+          type: 'bookmark' as const,
+          namespace: bookmark.namespace,
+          parentId: bookmark.parentId || null,
+          orderIndex: bookmark.orderIndex,
+          createdAt: bookmark.createdAt,
+          updatedAt: bookmark.updatedAt,
+          title: bookmark.name, // LocalBookmark uses 'name', UI expects 'title'
+          url: bookmark.url,
+          favorite: bookmark.isFavorite
+        };
+      } else {
+        // It's a folder
+        const folder = item as LocalDBFolder;
+        return {
+          id: folder.id,
+          type: 'folder' as const,
+          namespace: folder.namespace,
+          parentId: folder.parentId || null,
+          orderIndex: folder.orderIndex,
+          createdAt: folder.createdAt,
+          updatedAt: folder.updatedAt,
+          name: folder.name, // Folders use 'name' in both local and UI
+          open: folder.isOpen // LocalFolder uses 'isOpen', UI expects 'open'
+        };
+      }
+    });
+
+    // Sort by orderIndex
+    return bookmarkItems.sort((a, b) => (a.orderIndex || '').localeCompare(b.orderIndex || ''));
+  }
+
+  // Get children of a specific folder
+  async getFolderChildren(namespace: string, folderId: string): Promise<LocalBookmarkItem[]> {
+    const items = await offlineWorkerService.getFolderChildren(namespace, folderId) as (LocalDBBookmark | LocalDBFolder)[];
+    
+    // Convert to BookmarkItem format (same logic as getRootItems)
+    const bookmarkItems: LocalBookmarkItem[] = items.map((item: LocalDBBookmark | LocalDBFolder) => {
+      if ('url' in item && item.url) {
+        const bookmark = item as LocalDBBookmark;
+        return {
+          id: bookmark.id,
+          type: 'bookmark' as const,
+          namespace: bookmark.namespace,
+          parentId: bookmark.parentId || null,
+          orderIndex: bookmark.orderIndex,
+          createdAt: bookmark.createdAt,
+          updatedAt: bookmark.updatedAt,
+          title: bookmark.name,
+          url: bookmark.url,
+          favorite: bookmark.isFavorite
+        };
+      } else {
+        const folder = item as LocalDBFolder;
+        return {
+          id: folder.id,
+          type: 'folder' as const,
+          namespace: folder.namespace,
+          parentId: folder.parentId || null,
+          orderIndex: folder.orderIndex,
+          createdAt: folder.createdAt,
+          updatedAt: folder.updatedAt,
+          name: folder.name,
+          open: folder.isOpen
+        };
+      }
+    });
+
+    return bookmarkItems.sort((a, b) => (a.orderIndex || '').localeCompare(b.orderIndex || ''));
+  }
+
+  // Get all bookmarks for a namespace (LEGACY - for backwards compatibility)
   async getBookmarks(namespace: string): Promise<LocalBookmarkItem[]> {
   const items = await offlineWorkerService.getNamespaceItems(namespace) as (LocalDBBookmark | LocalDBFolder)[];
     
@@ -132,6 +214,66 @@ export class LocalDataService {
     // Sort roots as well
     rootItems.sort((a, b) => (a.orderIndex || '').localeCompare(b.orderIndex || ''));
     return rootItems;
+  }
+
+  // === FOLDER METADATA METHODS ===
+
+  // Check if folder's children are already cached
+  async hasFolderChildrenCached(namespace: string, folderId: string): Promise<boolean> {
+    try {
+      // Get folder metadata to check if children have been loaded
+      const metadata = await offlineWorkerService.getFolderMetadata(namespace, folderId);
+      return metadata?.hasLoadedChildren || false;
+    } catch {
+      console.log(`No metadata found for folder ${folderId}, assuming not cached`);
+      return false;
+    }
+  }
+
+  // Check if root items are cached
+  async hasRootItemsCached(namespace: string): Promise<boolean> {
+    try {
+      const rootItems = await this.getRootItems(namespace);
+      return rootItems.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  // === CONVERSION UTILITY ===
+
+  // Convert raw database items to UI-friendly BookmarkItem format
+  private convertToBookmarkItems(items: (LocalDBBookmark | LocalDBFolder)[]): LocalBookmarkItem[] {
+    return items.map((item: LocalDBBookmark | LocalDBFolder) => {
+      if ('url' in item && item.url) {
+        const bookmark = item as LocalDBBookmark;
+        return {
+          id: bookmark.id,
+          type: 'bookmark' as const,
+          namespace: bookmark.namespace,
+          parentId: bookmark.parentId || null,
+          orderIndex: bookmark.orderIndex,
+          createdAt: bookmark.createdAt,
+          updatedAt: bookmark.updatedAt,
+          title: bookmark.name,
+          url: bookmark.url,
+          favorite: bookmark.isFavorite
+        };
+      } else {
+        const folder = item as LocalDBFolder;
+        return {
+          id: folder.id,
+          type: 'folder' as const,
+          namespace: folder.namespace,
+          parentId: folder.parentId || null,
+          orderIndex: folder.orderIndex,
+          createdAt: folder.createdAt,
+          updatedAt: folder.updatedAt,
+          name: folder.name,
+          open: folder.isOpen
+        };
+      }
+    });
   }
 }
 

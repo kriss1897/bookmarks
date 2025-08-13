@@ -187,6 +187,36 @@ export class OfflineWorkerService {
     await this.workerAPI.fetchInitialData(namespace);
   }
 
+  // === NEW METHODS FOR INCREMENTAL LOADING ===
+
+  // NEW: Incremental loading methods
+  async getRootItems(namespace: string): Promise<unknown[]> {
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    return this.workerAPI.getRootItems(namespace);
+  }
+
+  async getFolderChildren(namespace: string, folderId: string): Promise<unknown[]> {
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    return this.workerAPI.getFolderChildren(namespace, folderId);
+  }
+
+  // Store individual item
+  async storeItem(namespace: string, item: unknown): Promise<void> {
+    if (!this.workerAPI) throw new Error("Worker not initialized");
+    await this.workerAPI.storeItem(namespace, item);
+  }
+
+  // Folder metadata management
+  async getFolderMetadata(namespace: string, folderId: string): Promise<{ hasLoadedChildren: boolean; lastLoadedAt: number; childrenCount: number } | null> {
+    if (!this.workerAPI) throw new Error("Worker not initialized");
+    return await this.workerAPI.getFolderMetadata(namespace, folderId);
+  }
+
+  async setFolderMetadata(namespace: string, folderId: string, metadata: { hasLoadedChildren: boolean; lastLoadedAt: number; childrenCount: number }): Promise<void> {
+    if (!this.workerAPI) throw new Error("Worker not initialized");
+    await this.workerAPI.setFolderMetadata(namespace, folderId, metadata);
+  }
+
   // Convenience methods for creating operations
   createBookmarkOperation(
     namespace: string,

@@ -243,6 +243,102 @@ export class OperationProcessor {
     }
   }
 
+  // NEW: Incremental data fetching methods
+  async fetchRootItems(namespace: string, isOnline: boolean): Promise<void> {
+    if (!isOnline) {
+      console.log('Offline - skipping root items fetch');
+      return;
+    }
+
+    try {
+      console.log(`Fetching root items for namespace: ${namespace}`);
+      
+      const response = await fetch(`/api/bookmarks/${encodeURIComponent(namespace)}?parentId=`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        console.log(`Received ${result.data.length} root items from server for namespace: ${namespace}`);
+        
+        // Store items in database incrementally
+        for (const item of result.data) {
+          await this.databaseManager.storeItem(namespace, item);
+        }
+        
+        this.eventEmitter('dataChanged', { namespace, type: 'rootItemsLoaded', itemCount: result.data.length });
+      }
+    } catch (error) {
+      console.error(`Failed to fetch root items for namespace ${namespace}:`, error);
+      this.eventEmitter('error', { namespace, type: 'rootItemsError', error: (error as Error).message });
+      throw error;
+    }
+  }
+
+  async fetchFolderChildren(namespace: string, folderId: string, isOnline: boolean): Promise<void> {
+    if (!isOnline) {
+      console.log('Offline - skipping folder children fetch');
+      return;
+    }
+
+    try {
+      console.log(`Fetching children for folder ${folderId} in namespace: ${namespace}`);
+      
+      const response = await fetch(`/api/bookmarks/${encodeURIComponent(namespace)}?parentId=${encodeURIComponent(folderId)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        console.log(`Received ${result.data.length} children for folder ${folderId} in namespace: ${namespace}`);
+        
+        // Store items in database incrementally
+        for (const item of result.data) {
+          await this.databaseManager.storeItem(namespace, item);
+        }
+        
+        // Update folder metadata to mark as loaded
+        await this.databaseManager.setFolderMetadata(namespace, folderId, {
+          hasLoadedChildren: true,
+          lastLoadedAt: Date.now(),
+          childrenCount: result.data.length
+        });
+        
+        this.eventEmitter('dataChanged', { 
+          namespace, 
+          type: 'folderChildrenLoaded', 
+          folderId, 
+          itemCount: result.data.length 
+        });
+      }
+    } catch (error) {
+      console.error(`Failed to fetch folder children for ${folderId} in namespace ${namespace}:`, error);
+      this.eventEmitter('error', { 
+        namespace, 
+        type: 'folderChildrenError', 
+        folderId, 
+        error: (error as Error).message 
+      });
+      throw error;
+    }
+  }
+
   private generateUUID(): string {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return crypto.randomUUID();

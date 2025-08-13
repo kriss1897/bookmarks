@@ -246,6 +246,60 @@ export class BookmarkAPI {
     return this.getItemsByParent(namespace, folderId);
   }
 
+  // === NEW RECURSIVE LOADING METHODS ===
+  
+  // Load folder contents with caching - for lazy loading
+  async loadFolderContents(namespace: string, folderId: string): Promise<LocalBookmarkItem[]> {
+    // Check if we already have this folder's children cached
+    const hasChildren = await localDataService.hasFolderChildrenCached(namespace, folderId);
+    
+    if (hasChildren) {
+      console.log(`Folder ${folderId} children already cached, returning from local storage`);
+      return localDataService.getFolderChildren(namespace, folderId);
+    }
+    
+    console.log(`Loading children for folder ${folderId} from server`);
+    // Fetch from server
+    const serverItems = await this.getItemsDirect(namespace, folderId);
+    
+    // Store incrementally in IndexedDB
+    await localDataService.storeFolderChildren(namespace, folderId, serverItems);
+    
+    // Convert to LocalBookmarkItem format and return
+    return localDataService.getFolderChildren(namespace, folderId);
+  }
+
+  // Get only root items (for initial load)
+  async getRootItemsOnly(namespace: string): Promise<LocalBookmarkItem[]> {
+    // Initialize namespace if needed
+    await this.initializeNamespace(namespace);
+    
+    // Subscribe to this namespace for updates
+    await offlineWorkerService.subscribe(namespace);
+    
+    // Check if we have root items cached
+    const hasRootItems = await localDataService.hasRootItemsCached(namespace);
+    
+    if (hasRootItems) {
+      console.log(`Root items for ${namespace} already cached`);
+      return localDataService.getRootItems(namespace);
+    }
+    
+    console.log(`Loading root items for ${namespace} from server`);
+    // Fetch only root items from server
+    const serverItems = await this.getRootItems(namespace);
+    
+    // Store in IndexedDB
+    await localDataService.storeRootItems(namespace, serverItems);
+    
+    return localDataService.getRootItems(namespace);
+  }
+
+  // Check if folder has been loaded
+  async isFolderLoaded(namespace: string, folderId: string): Promise<boolean> {
+    return localDataService.hasFolderChildrenCached(namespace, folderId);
+  }
+
   // Legacy methods (now proxy to offline-first versions for backwards compatibility)
   
   async getItems(namespace: string): Promise<LocalBookmarkItem[]> {

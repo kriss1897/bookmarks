@@ -4,6 +4,8 @@ import { bookmarkAPI } from '../services/bookmarkAPI';
 import type { LocalBookmarkItem } from '../services/localDataService';
 import { Button } from '@/components/ui/button';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
+import { MoveToFolderModal } from './MoveToFolderModal';
+import { BookmarkTreeNode } from './BookmarkTreeNode';
 import { generateKeyBetween } from 'fractional-indexing';
 
 interface BookmarkManagerProps {
@@ -11,10 +13,13 @@ interface BookmarkManagerProps {
 }
 
 export function BookmarkManager({ namespace }: BookmarkManagerProps) {
-  const [items, setItems] = useState<LocalBookmarkItem[]>([]);
+  const [rootItems, setRootItems] = useState<LocalBookmarkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState<'folder' | 'bookmark' | null>(null);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [itemToMove, setItemToMove] = useState<LocalBookmarkItem | null>(null);
+  const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const { addEventListener, connect } = useWorkerConnection();
 
   // Form states
@@ -22,26 +27,62 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   const [bookmarkTitle, setBookmarkTitle] = useState('');
   const [bookmarkUrl, setBookmarkUrl] = useState('');
 
-  // Load items when component mounts or namespace changes
-  const loadItems = useCallback(async () => {
+  // Load only root items initially
+  const loadRootItems = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      console.log('Loading items for namespace:', namespace);
-      const data = await bookmarkAPI.getBookmarks(namespace);
-      console.log('Loaded items:', data);
-      setItems(data);
+      console.log('Loading root items for namespace:', namespace);
+      const data = await bookmarkAPI.getRootItemsOnly(namespace);
+      console.log('Loaded root items:', data);
+      setRootItems(data);
     } catch (err) {
-      console.error('Error loading items:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load items');
+      console.error('Error loading root items:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load root items');
     } finally {
       setLoading(false);
     }
   }, [namespace]);
 
+  // Helper function to recursively update folder with children
+  const updateFolderWithChildren = useCallback((items: LocalBookmarkItem[], folderId: string, children: LocalBookmarkItem[]): LocalBookmarkItem[] => {
+    return items.map(item => {
+      if (item.id === folderId && item.type === 'folder') {
+        return { ...item, children };
+      } else if (item.type === 'folder' && item.children) {
+        return { ...item, children: updateFolderWithChildren(item.children, folderId, children) };
+      }
+      return item;
+    });
+  }, []);
+
+  // Load children for a specific folder
+  const loadFolderChildren = useCallback(async (folderId: string) => {
+    try {
+      setLoadingFolders(prev => new Set([...prev, folderId]));
+      console.log(`Loading children for folder ${folderId}`);
+      
+      const children = await bookmarkAPI.loadFolderContents(namespace, folderId);
+      console.log(`Loaded ${children.length} children for folder ${folderId}:`, children);
+      
+      // Update the folder in rootItems to include children
+      setRootItems(prevItems => updateFolderWithChildren(prevItems, folderId, children));
+      
+    } catch (err) {
+      console.error(`Error loading children for folder ${folderId}:`, err);
+      setError(err instanceof Error ? err.message : 'Failed to load folder contents');
+    } finally {
+      setLoadingFolders(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(folderId);
+        return newSet;
+      });
+    }
+  }, [namespace, updateFolderWithChildren]);
+
   useEffect(() => {
-    loadItems();
-  }, [loadItems]);
+    loadRootItems();
+  }, [loadRootItems]);
 
   // Connect to worker when namespace changes and listen for data changes
   useEffect(() => {
@@ -68,9 +109,9 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
           console.log('Received SSE event:', eventData);
           
           if (eventData.namespace === namespace) {
-            console.log('SSE event received for namespace:', namespace, 'reloading items');
+            console.log('SSE event received for namespace:', namespace, 'reloading root items');
             // Force immediate reload on any SSE event for this namespace
-            await loadItems();
+            await loadRootItems();
           }
         });
       } catch (error) {
@@ -81,7 +122,7 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     if (namespace) {
       setupWorkerConnection();
     }
-  }, [namespace, connect, addEventListener, loadItems]);
+  }, [namespace, connect, addEventListener, loadRootItems]);
 
   // Add folder handler
   const addFolder = async () => {
@@ -90,13 +131,13 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     try {
       setLoading(true);
       // Compute an orderIndex at the end of roots
-      const rootItems = items.filter(i => !i.parentId);
-      const last = rootItems[rootItems.length - 1];
-  const orderIndex = last ? generateKeyBetween(last.orderIndex, null) : generateKeyBetween(null, null);
+      const rootOnlyItems = rootItems.filter((i: LocalBookmarkItem) => !i.parentId);
+      const last = rootOnlyItems[rootOnlyItems.length - 1];
+      const orderIndex = last ? generateKeyBetween(last.orderIndex, null) : generateKeyBetween(null, null);
       await bookmarkAPI.createFolder(namespace, { name: folderName, orderIndex });
       setFolderName('');
       setShowAddForm(null);
-      await loadItems();
+      await loadRootItems();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add folder');
     } finally {
@@ -110,9 +151,9 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     
     try {
       setLoading(true);
-      const rootItems = items.filter(i => !i.parentId);
-      const last = rootItems[rootItems.length - 1];
-  const orderIndex = last ? generateKeyBetween(last.orderIndex, null) : generateKeyBetween(null, null);
+      const rootOnlyItems = rootItems.filter((i: LocalBookmarkItem) => !i.parentId);
+      const last = rootOnlyItems[rootOnlyItems.length - 1];
+      const orderIndex = last ? generateKeyBetween(last.orderIndex, null) : generateKeyBetween(null, null);
       await bookmarkAPI.createBookmark(namespace, { 
         title: bookmarkTitle, 
         url: bookmarkUrl,
@@ -121,7 +162,7 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
       setBookmarkTitle('');
       setBookmarkUrl('');
       setShowAddForm(null);
-      await loadItems();
+      await loadRootItems();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add bookmark');
     } finally {
@@ -129,14 +170,20 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     }
   };
 
-  // Toggle folder open/closed
+  // Toggle folder open/closed - now includes lazy loading
   const toggleFolder = async (folderId: string) => {
     try {
-      const folder = items.find(item => item.id === folderId && item.type === 'folder');
-      if (!folder) return;
+      // Find the folder in our tree structure
+      const folder = findItemInTree(rootItems, folderId);
+      if (!folder || folder.type !== 'folder') return;
+      
+      if (!folder.open) {
+        // Load children if folder is being opened
+        await loadFolderChildren(folderId);
+      }
       
       await bookmarkAPI.toggleFolder(namespace, folderId, !folder.open);
-      await loadItems();
+      await loadRootItems(); // Refresh to get updated state
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to toggle folder');
     }
@@ -145,11 +192,11 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   // Toggle bookmark favorite
   const toggleFavorite = async (bookmarkId: string) => {
     try {
-      const bookmark = items.find(item => item.id === bookmarkId && item.type === 'bookmark');
-      if (!bookmark) return;
+      const bookmark = findItemInTree(rootItems, bookmarkId);
+      if (!bookmark || bookmark.type !== 'bookmark') return;
       
       await bookmarkAPI.toggleBookmarkFavorite(namespace, bookmarkId, !bookmark.favorite);
-      await loadItems();
+      await loadRootItems(); // Refresh to get updated state
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to toggle favorite');
     }
@@ -161,53 +208,85 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     
     try {
       await bookmarkAPI.deleteItem(namespace, itemId);
-      await loadItems();
+      await loadRootItems(); // Refresh tree
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete item');
     }
   };
 
-  // Move item up
+  // Helper function to find item in tree structure
+  const findItemInTree = (items: LocalBookmarkItem[], targetId: string): LocalBookmarkItem | null => {
+    for (const item of items) {
+      if (item.id === targetId) {
+        return item;
+      }
+      if (item.type === 'folder' && item.children) {
+        const found = findItemInTree(item.children, targetId);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // Move item up - simplified for now
   const moveItemUp = async (index: number) => {
-    if (index <= 0) return;
-    const item = items[index];
-    const prevItem = items[index - 1];
-    if (!item || !prevItem) return;
-    try {
-      setLoading(true);
-      const before = items[index - 2]?.orderIndex || null;
-      const targetOrderIndex = generateKeyBetween(before, prevItem.orderIndex);
-      await bookmarkAPI.moveItem(namespace, item.id, undefined, targetOrderIndex);
-      await loadItems();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to move item up');
-    } finally {
-      setLoading(false);
-    }
+    // TODO: Implement for hierarchical structure
+    console.log('Move up not yet implemented for hierarchical structure', index);
   };
 
-  // Move item down
+  // Move item down - simplified for now
   const moveItemDown = async (index: number) => {
-    if (index >= items.length - 1) return;
-    const item = items[index];
-    const nextItem = items[index + 1];
+    // TODO: Implement for hierarchical structure
+    console.log('Move down not yet implemented for hierarchical structure', index);
+  };
 
-    console.log(item, nextItem);
+  // Open move to folder modal
+  const openMoveModal = (item: LocalBookmarkItem) => {
+    setItemToMove(item);
+    setShowMoveModal(true);
+  };
 
-    if (!item || !nextItem) return;
+  // Move item to folder
+  const moveItemToFolder = async (targetFolderId: string | null) => {
+    if (!itemToMove) return;
+
     try {
       setLoading(true);
-      const after = items[index + 2]?.orderIndex || null;
-      const targetOrderIndex = generateKeyBetween(nextItem.orderIndex, after);
-      await bookmarkAPI.moveItem(namespace, item.id, undefined, targetOrderIndex);
-      await loadItems();
+      
+      // For now, use a simple approach - we'll improve this when we implement full hierarchical move
+      const targetOrderIndex = generateKeyBetween(null, null);
+
+      await bookmarkAPI.moveItem(namespace, itemToMove.id, targetFolderId || undefined, targetOrderIndex);
+      await loadRootItems(); // Refresh tree
+      setItemToMove(null);
+      setShowMoveModal(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to move item down');
+      setError(err instanceof Error ? err.message : 'Failed to move item to folder');
     } finally {
       setLoading(false);
     }
   };
-  if (loading && items.length === 0) {
+
+  // Get all folders for move modal (flatten the tree structure)
+  const getAllFolders = (items: LocalBookmarkItem[]): LocalBookmarkItem[] => {
+    const folders: LocalBookmarkItem[] = [];
+    
+    const collectFolders = (nodeItems: LocalBookmarkItem[]) => {
+      for (const item of nodeItems) {
+        if (item.type === 'folder') {
+          folders.push(item);
+          if (item.children) {
+            collectFolders(item.children);
+          }
+        }
+      }
+    };
+    
+    collectFolders(items);
+    return folders;
+  };
+
+  if (loading && rootItems.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center">
         <LoadingSpinner />
@@ -296,74 +375,46 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
         </div>
       )}
 
-      {/* Items list */}
+      {/* Items list - now hierarchical */}
       <div className="space-y-2">
-        {items.length === 0 ? (
+        {rootItems.length === 0 ? (
           <div className="text-center text-gray-500 py-8">
             No bookmarks yet. Add some to get started!
           </div>
         ) : (
-          items.map((item, index) => (
-            <div
+          rootItems.map((item, index) => (
+            <BookmarkTreeNode
               key={item.id}
-              className="flex items-center justify-between rounded border p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              <div className="flex items-center gap-3">
-                {/* Move up/down buttons */}
-                <div className="flex flex-col gap-1 mr-2">
-                  <button
-                    onClick={() => moveItemUp(index)}
-                    disabled={index === 0}
-                    title="Move up"
-                    className="text-gray-500 hover:text-blue-600 disabled:opacity-30"
-                  >
-                    ▲ Up
-                  </button>
-                  <button
-                    onClick={() => moveItemDown(index)}
-                    disabled={index === items.length - 1}
-                    title="Move down"
-                    className="text-gray-500 hover:text-blue-600 disabled:opacity-30"
-                  >
-                    ▼ Down
-                  </button>
-                </div>
-                {item.type === 'folder' ? (
-                  <button
-                    onClick={() => toggleFolder(item.id)}
-                    className="text-blue-600 hover:text-blue-800"
-                  >
-                    📁 {item.name} {item.open ? '(open)' : '(closed)'}
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => toggleFavorite(item.id)}
-                      className={`text-lg ${item.favorite ? 'text-yellow-500' : 'text-gray-400'}`}
-                    >
-                      ⭐
-                    </button>
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 hover:underline"
-                    >
-                      {item.title || item.name}
-                    </a>
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={() => deleteItem(item.id)}
-                className="text-red-600 hover:text-red-800 px-2 py-1 rounded"
-              >
-                Delete
-              </button>
-            </div>
+              item={item}
+              namespace={namespace}
+              level={0}
+              index={index}
+              onLoadChildren={loadFolderChildren}
+              onToggleFolder={toggleFolder}
+              onToggleFavorite={toggleFavorite}
+              onDeleteItem={deleteItem}
+              onMoveUp={moveItemUp}
+              onMoveDown={moveItemDown}
+              onOpenMoveModal={openMoveModal}
+              isLoadingChildren={loadingFolders.has(item.id)}
+              totalSiblingsCount={rootItems.length}
+            />
           ))
         )}
       </div>
+
+      {/* Move to Folder Modal */}
+      <MoveToFolderModal
+        isOpen={showMoveModal}
+        onClose={() => {
+          setShowMoveModal(false);
+          setItemToMove(null);
+        }}
+        onMove={moveItemToFolder}
+        item={itemToMove}
+        folders={getAllFolders(rootItems)}
+        loading={loading}
+      />
     </div>
   );
 }

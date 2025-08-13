@@ -33,6 +33,12 @@ export interface StoredFolder {
   updatedAt: number;
 }
 
+export interface FolderMetadata {
+  hasLoadedChildren: boolean;
+  lastLoadedAt: number;
+  childrenCount: number;
+}
+
 export interface ServerItem {
   id: string;
   type: 'bookmark' | 'folder';
@@ -68,6 +74,15 @@ export interface WorkerAPI {
   getItemById(namespace: string, id: string | number): Promise<ServerItem | null>;
   reconcileWithServer(namespace: string, serverItems: ServerItem[]): Promise<void>;
   fetchInitialData(namespace: string): Promise<void>;
+  
+  // NEW: Incremental loading methods
+  getRootItems(namespace: string): Promise<(StoredBookmark | StoredFolder)[]>;
+  getFolderChildren(namespace: string, folderId: string): Promise<(StoredBookmark | StoredFolder)[]>;
+  
+  // Incremental data storage
+  storeItem(namespace: string, item: unknown): Promise<void>;
+  getFolderMetadata(namespace: string, folderId: string): Promise<FolderMetadata | null>;
+  setFolderMetadata(namespace: string, folderId: string, metadata: FolderMetadata): Promise<void>;
   
   // Utility operations
   getPendingOperationsCount(namespace: string): Promise<number>;

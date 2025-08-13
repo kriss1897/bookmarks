@@ -145,6 +145,51 @@ class SSESharedWorkerImpl implements WorkerAPI {
     return this.operationProcessor.fetchInitialData(namespace, this.connectionManager.onlineStatus);
   }
 
+  // NEW: Incremental loading methods
+  async getRootItems(namespace: string): Promise<(StoredBookmark | StoredFolder)[]> {
+    // First try to fetch from server if online
+    try {
+      await this.operationProcessor.fetchRootItems(namespace, this.connectionManager.onlineStatus);
+    } catch (error) {
+      console.warn('Failed to fetch root items from server, using cached data:', error);
+    }
+    
+    // Return items from local database (either newly fetched or cached)
+    return this.databaseManager.getRootItems(namespace);
+  }
+
+  async getFolderChildren(namespace: string, folderId: string): Promise<(StoredBookmark | StoredFolder)[]> {
+    // Check if we already have this folder's children loaded
+    const metadata = await this.databaseManager.getFolderMetadata(namespace, folderId);
+    const shouldFetch = !metadata?.hasLoadedChildren || 
+                       (Date.now() - metadata.lastLoadedAt) > 5 * 60 * 1000; // 5 minutes cache
+
+    if (shouldFetch) {
+      try {
+        await this.operationProcessor.fetchFolderChildren(namespace, folderId, this.connectionManager.onlineStatus);
+      } catch (error) {
+        console.warn(`Failed to fetch children for folder ${folderId}, using cached data:`, error);
+      }
+    } else {
+      console.log(`Using cached children for folder ${folderId}`);
+    }
+    
+    // Return children from local database
+    return this.databaseManager.getFolderChildren(namespace, folderId);
+  }
+
+  async storeItem(namespace: string, item: unknown): Promise<void> {
+    return this.databaseManager.storeItem(namespace, item as ServerItem);
+  }
+
+  async getFolderMetadata(namespace: string, folderId: string): Promise<{ hasLoadedChildren: boolean; lastLoadedAt: number; childrenCount: number } | null> {
+    return this.databaseManager.getFolderMetadata(namespace, folderId);
+  }
+
+  async setFolderMetadata(namespace: string, folderId: string, metadata: { hasLoadedChildren: boolean; lastLoadedAt: number; childrenCount: number }): Promise<void> {
+    return this.databaseManager.setFolderMetadata(namespace, folderId, metadata);
+  }
+
   // Utility operations
   async getPendingOperationsCount(namespace: string): Promise<number> {
     return this.databaseManager.getPendingOperationsCount(namespace);
