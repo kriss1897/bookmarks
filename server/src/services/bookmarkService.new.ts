@@ -266,115 +266,44 @@ export class BookmarkService {
 
   // === SYNC-SPECIFIC METHODS ===
   
-  // With UUIDs, create methods are simplified - no temp ID tracking needed
-  async createFolderWithId(namespace: string, data: {
-    id: string;
-    name: string;
-    parentId?: string | null;
-  }): Promise<BookmarkItem> {
-    // Find the current tail of the sibling list
-    const currentTail = await this.findTailSiblingNonTx(namespace, data.parentId || undefined);
-
-    // Use the provided ID instead of generating a new one
-    const nodeId = data.id;
-
-    // Insert new node
-    const [newNode] = await db.insert(nodes).values({
-      id: nodeId,
-      namespace,
-      type: 'folder',
-      parentId: data.parentId || null,
-      prevSiblingId: currentTail?.id || null,
-      nextSiblingId: null,
-    }).returning();
-
-    // Update the previous tail's nextSiblingId
-    if (currentTail) {
-      await db.update(nodes)
-        .set({ nextSiblingId: newNode.id, updatedAt: Math.floor(Date.now() / 1000) })
-        .where(eq(nodes.id, currentTail.id));
-    }
-
-    // Insert folder details
-    await db.insert(folders).values({
-      nodeId: newNode.id,
-      name: data.name,
-    });
-
-    // Insert default folder state (open)
-    await db.insert(folderState).values({
-      namespace,
-      nodeId: newNode.id,
-      open: true,
-    });
-
-    return {
-      id: newNode.id,
-      type: 'folder' as const,
-      namespace: newNode.namespace,
-      parentId: newNode.parentId,
-      prevSiblingId: newNode.prevSiblingId,
-      nextSiblingId: newNode.nextSiblingId,
-      createdAt: newNode.createdAt,
-      updatedAt: newNode.updatedAt,
-      name: data.name,
-      open: true,
-    };
+  // Find item by temp ID (for operation idempotency) - No longer needed with UUIDs!
+  async findByTempId(namespace: string, tempId: string): Promise<BookmarkItem | null> {
+    // With UUIDs, we no longer need temp ID tracking since client generates final IDs
+    return null;
   }
 
-  async createBookmarkWithId(namespace: string, data: {
-    id: string;
+  // Enhanced create folder with temp ID tracking - Simplified with UUIDs
+  async createFolderWithTempId(namespace: string, data: {
+    name: string;
+    parentId?: string | null;
+    tempId?: string;
+  }): Promise<BookmarkItem> {
+    return this.createFolder(namespace, data.name, data.parentId || undefined);
+  }
+
+  // Enhanced create bookmark with temp ID tracking - Simplified with UUIDs
+  async createBookmarkWithTempId(namespace: string, data: {
     title: string;
     url: string;
     parentId?: string | null;
     favorite?: boolean;
+    tempId?: string;
   }): Promise<BookmarkItem> {
-    // Find the current tail of the sibling list
-    const currentTail = await this.findTailSiblingNonTx(namespace, data.parentId || undefined);
+    const bookmark = await this.createBookmark(
+      namespace, 
+      data.title, 
+      data.url, 
+      undefined, 
+      data.parentId || undefined
+    );
 
-    // Use the provided ID instead of generating a new one
-    const nodeId = data.id;
-
-    // Insert new node
-    const [newNode] = await db.insert(nodes).values({
-      id: nodeId,
-      namespace,
-      type: 'bookmark',
-      parentId: data.parentId || null,
-      prevSiblingId: currentTail?.id || null,
-      nextSiblingId: null,
-    }).returning();
-
-    // Update the previous tail's nextSiblingId
-    if (currentTail) {
-      await db.update(nodes)
-        .set({ nextSiblingId: newNode.id, updatedAt: Math.floor(Date.now() / 1000) })
-        .where(eq(nodes.id, currentTail.id));
+    // Set favorite if requested
+    if (data.favorite) {
+      await this.toggleBookmarkFavorite(bookmark.id);
+      bookmark.favorite = true;
     }
 
-    // Insert bookmark details
-    await db.insert(bookmarks).values({
-      nodeId: newNode.id,
-      title: data.title,
-      url: data.url,
-      icon: null,
-      favorite: data.favorite || false,
-    });
-
-    return {
-      id: newNode.id,
-      type: 'bookmark' as const,
-      namespace: newNode.namespace,
-      parentId: newNode.parentId,
-      prevSiblingId: newNode.prevSiblingId,
-      nextSiblingId: newNode.nextSiblingId,
-      createdAt: newNode.createdAt,
-      updatedAt: newNode.updatedAt,
-      title: data.title,
-      url: data.url,
-      icon: undefined,
-      favorite: data.favorite || false,
-    };
+    return bookmark;
   }
 
   // Generic update method for items

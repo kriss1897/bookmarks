@@ -183,46 +183,6 @@ export class APIController {
     }
   };
 
-  /**
-   * POST /api/cleanup - Force cleanup all connections or specific namespace
-   */
-  forceCleanup = (req: Request, res: Response): void => {
-    try {
-      const { namespace } = req.body;
-      
-      if (!this.sseManager) {
-        res.status(500).json({
-          error: 'SSE Manager not available',
-          code: 'SSE_UNAVAILABLE'
-        });
-        return;
-      }
-
-      if (namespace) {
-        this.sseManager.forceCleanupNamespace(namespace);
-        res.json({
-          success: true,
-          message: `Cleanup triggered for namespace: ${namespace}`,
-          namespace: namespace,
-          timestamp: new Date().toISOString()
-        });
-      } else {
-        this.sseManager.forceCleanup();
-        res.json({
-          success: true,
-          message: 'Cleanup triggered for all connections',
-          namespace: 'all',
-          timestamp: new Date().toISOString()
-        });
-      }
-    } catch (error) {
-      console.error('Error triggering cleanup:', error);
-      res.status(500).json({
-        error: 'Internal server error',
-        code: 'CLEANUP_ERROR'
-      });
-    }
-  };
 
   private generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

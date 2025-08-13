@@ -42,37 +42,37 @@ export interface CreateBookmarkPayload {
   id: string; // temp ID initially
   name: string;
   url: string;
-  parentId?: number;
+  parentId?: string;
   isFavorite?: boolean;
 }
 
 export interface UpdateBookmarkPayload {
-  id: number | string;
+  id: string;
   name?: string;
   url?: string;
   isFavorite?: boolean;
 }
 
 export interface DeleteItemPayload {
-  id: number | string;
+  id: string;
 }
 
 export interface CreateFolderPayload {
   id: string; // temp ID initially
   name: string;
-  parentId?: number;
+  parentId?: string;
 }
 
 export interface UpdateFolderPayload {
-  id: number | string;
+  id: string;
   name?: string;
   isOpen?: boolean;
 }
 
 export interface MoveItemPayload {
-  id: number | string;
-  newParentId?: number;
-  afterId?: number; // For ordering
+  id: string;
+  newParentId?: string;
+  afterId?: string; // For ordering
 }
 
 // Worker message types
@@ -164,14 +164,6 @@ export interface AppliedOperation {
 }
 
 // Utility functions
-export function generateTempId(): string {
-  return `temp_${crypto.randomUUID()}`;
-}
-
-export function isTemporaryId(id: string | number): boolean {
-  return typeof id === 'string' && id.startsWith('temp_');
-}
-
 export function generateClientId(): string {
   const stored = localStorage.getItem('clientId');
   if (stored) return stored;

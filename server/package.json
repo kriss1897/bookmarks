@@ -10,7 +10,10 @@
     "prod:dev": "tsx watch --exclude 'node_modules/**' --exclude 'dist/**' src/prod.ts",
     "build": "tsc",
     "start": "node dist/prod.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "db:setup": "tsx src/db/setup.ts",
+    "db:reset": "rm -f data/bookmarks.db* && npm run db:setup",
+    "db:backup": "cp data/bookmarks.db data/bookmarks.db.backup-$(date +%Y%m%d-%H%M%S)"
   },
   "keywords": [
     "express",

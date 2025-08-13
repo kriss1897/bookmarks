@@ -1,11 +1,11 @@
 // Types matching the server
 export interface BookmarkItem {
-  id: number;
+  id: string;
   type: 'folder' | 'bookmark';
   namespace: string;
-  parentId: number | null;
-  prevSiblingId: number | null;
-  nextSiblingId: number | null;
+  parentId: string | null;
+  prevSiblingId: string | null;
+  nextSiblingId: string | null;
   createdAt: number;
   updatedAt: number;
   // Folder-specific fields
@@ -20,19 +20,19 @@ export interface BookmarkItem {
 
 export interface CreateFolderRequest {
   name: string;
-  parentId?: number;
+  parentId?: string;
 }
 
 export interface CreateBookmarkRequest {
   title: string;
   url: string;
   icon?: string;
-  parentId?: number;
+  parentId?: string;
 }
 
 export interface MoveItemRequest {
-  newParentId?: number;
-  afterItemId?: number;
+  newParentId?: string;
+  afterItemId?: string;
 }
 
 // Import offline services
@@ -105,7 +105,7 @@ export class BookmarkAPI {
     
     // Return the created folder item for UI optimistic update
     return {
-      id: typeof operation.payload.id === 'string' ? parseInt(operation.payload.id) || -1 : operation.payload.id,
+      id: operation.payload.id,
       type: 'folder' as const,
       namespace,
       parentId: request.parentId || null,
@@ -134,7 +134,7 @@ export class BookmarkAPI {
     
     // Return the created bookmark item for UI optimistic update
     return {
-      id: typeof operation.payload.id === 'string' ? parseInt(operation.payload.id) || -1 : operation.payload.id,
+      id: operation.payload.id,
       type: 'bookmark' as const,
       namespace,
       parentId: request.parentId || null,
@@ -150,7 +150,7 @@ export class BookmarkAPI {
   }
 
   // Update bookmark
-  async updateBookmark(namespace: string, id: number | string, updates: {
+  async updateBookmark(namespace: string, id: string | string, updates: {
     title?: string;
     url?: string;
     favorite?: boolean;
@@ -166,7 +166,7 @@ export class BookmarkAPI {
   }
 
   // Update folder
-  async updateFolder(namespace: string, id: number | string, updates: {
+  async updateFolder(namespace: string, id: string | string, updates: {
     name?: string;
     open?: boolean;
   }): Promise<void> {
@@ -180,17 +180,17 @@ export class BookmarkAPI {
   }
 
   // Toggle folder open/close
-  async toggleFolder(namespace: string, id: number | string, isOpen: boolean): Promise<void> {
+  async toggleFolder(namespace: string, id: string | string, isOpen: boolean): Promise<void> {
     await this.updateFolder(namespace, id, { open: isOpen });
   }
 
   // Toggle bookmark favorite
-  async toggleBookmarkFavorite(namespace: string, id: number | string, isFavorite: boolean): Promise<void> {
+  async toggleBookmarkFavorite(namespace: string, id: string | string, isFavorite: boolean): Promise<void> {
     await this.updateBookmark(namespace, id, { favorite: isFavorite });
   }
 
   // Move item
-  async moveItem(namespace: string, itemId: number | string, newParentId?: number, afterId?: number): Promise<void> {
+  async moveItem(namespace: string, itemId: string | string, newParentId?: string, afterId?: string): Promise<void> {
     const operation = offlineWorkerService.moveItemOperation(namespace, {
       id: itemId,
       newParentId,
@@ -201,7 +201,7 @@ export class BookmarkAPI {
   }
 
   // Delete item
-  async deleteItem(namespace: string, id: number | string): Promise<void> {
+  async deleteItem(namespace: string, id: string): Promise<void> {
     const operation = offlineWorkerService.deleteItemOperation(namespace, id);
     await offlineWorkerService.enqueueOperation(namespace, operation);
   }
@@ -231,7 +231,7 @@ export class BookmarkAPI {
     return this.getBookmarks(namespace);
   }
 
-  async toggleFolderState(namespace: string, folderId: number | string): Promise<boolean> {
+  async toggleFolderState(namespace: string, folderId: string): Promise<boolean> {
     // Get current state first
     const bookmarks = await this.getBookmarks(namespace);
     const folder = bookmarks.find(b => b.id === folderId && b.type === 'folder');

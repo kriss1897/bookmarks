@@ -9,10 +9,10 @@ export interface LocalBookmarkItem extends BookmarkItem {
 
 // Database item types
 interface LocalDBBookmark {
-  id: string | number;
+  id: string;
   name: string;
   url: string;
-  parentId?: number;
+  parentId?: string;
   isFavorite: boolean;
   namespace: string;
   isTemporary: boolean;
@@ -21,9 +21,9 @@ interface LocalDBBookmark {
 }
 
 interface LocalDBFolder {
-  id: string | number;
+  id: string;
   name: string;
-  parentId?: number;
+  parentId?: string;
   isOpen: boolean;
   namespace: string;
   isTemporary: boolean;
@@ -43,7 +43,7 @@ export class LocalDataService {
         // It's a bookmark
         const bookmark = item as LocalDBBookmark;
         return {
-          id: typeof bookmark.id === 'string' ? parseInt(bookmark.id) || -1 : bookmark.id,
+          id: bookmark.id,
           type: 'bookmark' as const,
           namespace: bookmark.namespace,
           parentId: bookmark.parentId || null,
@@ -59,7 +59,7 @@ export class LocalDataService {
         // It's a folder
         const folder = item as LocalDBFolder;
         return {
-          id: typeof folder.id === 'string' ? parseInt(folder.id) || -1 : folder.id,
+          id: folder.id,
           type: 'folder' as const,
           namespace: folder.namespace,
           parentId: folder.parentId || null,
@@ -100,7 +100,7 @@ export class LocalDataService {
 
   // Build hierarchical structure from flat array
   private buildHierarchy(items: LocalBookmarkItem[]): LocalBookmarkItem[] {
-    const itemMap = new Map<number, LocalBookmarkItem>();
+    const itemMap = new Map<string, LocalBookmarkItem>();
     const rootItems: LocalBookmarkItem[] = [];
 
     // First pass: create map and identify root items

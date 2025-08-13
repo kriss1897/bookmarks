@@ -12,35 +12,33 @@ import type {
 
 // Database object interfaces
 interface StoredBookmark {
-  id: string | number;
+  id: string;
   name: string;
   url: string;
-  parentId?: number;
+  parentId?: string;
   isFavorite: boolean;
   namespace: string;
-  isTemporary: boolean;
   createdAt: number;
   updatedAt: number;
 }
 
 interface StoredFolder {
-  id: string | number;
+  id: string;
   name: string;
-  parentId?: number;
+  parentId?: string;
   isOpen: boolean;
   namespace: string;
-  isTemporary: boolean;
   createdAt: number;
   updatedAt: number;
 }
 
 interface ServerItem {
-  id: number;
+  id: string;
   type: 'bookmark' | 'folder';
   namespace: string;
-  parentId?: number | null;
-  prevSiblingId?: number | null;
-  nextSiblingId?: number | null;
+  parentId?: string | null;
+  prevSiblingId?: string | null;
+  nextSiblingId?: string | null;
   createdAt: number;
   updatedAt: number;
   title?: string;
@@ -181,6 +179,18 @@ class SSESharedWorkerImpl implements WorkerAPI {
     return `client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
+  private generateUUID(): string {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    // Fallback for environments without crypto.randomUUID
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c == 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
   // Connection management
   async connect(namespace: string): Promise<void> {
     if (!namespace?.trim()) {
@@ -239,8 +249,21 @@ class SSESharedWorkerImpl implements WorkerAPI {
 
   // Operation management
   async enqueueOperation(namespace: string, operation: Omit<Operation, 'clientId'>): Promise<void> {
+    // Generate UUIDs for CREATE operations if they don't have IDs
+    // This eliminates the need for temporary IDs and complex ID mapping during sync
+    let modifiedOperation = operation;
+    if ((operation.type === 'CREATE_BOOKMARK' || operation.type === 'CREATE_FOLDER') && !operation.payload.id) {
+      modifiedOperation = {
+        ...operation,
+        payload: {
+          ...operation.payload,
+          id: this.generateUUID()
+        }
+      };
+    }
+
     const fullOperation: Operation = {
-      ...operation,
+      ...modifiedOperation,
       clientId: this.clientId
     };
 
@@ -332,7 +355,6 @@ class SSESharedWorkerImpl implements WorkerAPI {
             parentId: payload.parentId,
             isFavorite: payload.isFavorite || false,
             namespace: operation.namespace,
-            isTemporary: payload.id.toString().startsWith('temp_'),
             createdAt: now,
             updatedAt: now
           };
@@ -348,7 +370,6 @@ class SSESharedWorkerImpl implements WorkerAPI {
             parentId: payload.parentId,
             isOpen: false,
             namespace: operation.namespace,
-            isTemporary: payload.id.toString().startsWith('temp_'),
             createdAt: now,
             updatedAt: now
           };
@@ -394,7 +415,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
           const folderToDelete = await this.getFromStore(foldersStore, payload.id);
           if (folderToDelete) {
             // Recursively delete all children of this folder
-            await this.deleteChildrenRecursively(bookmarksStore, foldersStore, payload.id, operation.namespace);
+            await this.deleteChildrenRecursively(bookmarksStore, foldersStore, payload.id.toString(), operation.namespace);
           }
           
           // Delete the item itself (folder or bookmark)
@@ -447,7 +468,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
 
     if (bookmark && bookmark.namespace === namespace) {
       return {
-        id: typeof bookmark.id === 'string' ? parseInt(bookmark.id) || -1 : bookmark.id,
+        id: bookmark.id,
         type: 'bookmark',
         namespace: bookmark.namespace,
         parentId: bookmark.parentId || null,
@@ -463,7 +484,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
 
     if (folder && folder.namespace === namespace) {
       return {
-        id: typeof folder.id === 'string' ? parseInt(folder.id) || -1 : folder.id,
+        id: folder.id,
         type: 'folder',
         namespace: folder.namespace,
         parentId: folder.parentId || null,
@@ -487,18 +508,22 @@ class SSESharedWorkerImpl implements WorkerAPI {
     const bookmarksStore = transaction.objectStore('bookmarks');
     const foldersStore = transaction.objectStore('folders');
     
-    // Clear existing non-temporary items for this namespace
+    // Clear existing items for this namespace (keeping local-only items with UUID IDs)
     const bookmarks = await this.getAllFromStore(bookmarksStore, 'namespace', namespace) as StoredBookmark[];
     const folders = await this.getAllFromStore(foldersStore, 'namespace', namespace) as StoredFolder[];
     
+    // Only remove items that might have come from server (we'll identify by pattern or keep all)
+    // For now, we'll clear all and re-add from server, keeping any with UUID format
     for (const bookmark of bookmarks) {
-      if (!bookmark.isTemporary) {
+      // Keep bookmarks with UUID format (local-only), remove others
+      if (!this.isUUID(bookmark.id)) {
         await this.deleteFromStore(bookmarksStore, bookmark.id);
       }
     }
     
     for (const folder of folders) {
-      if (!folder.isTemporary) {
+      // Keep folders with UUID format (local-only), remove others
+      if (!this.isUUID(folder.id)) {
         await this.deleteFromStore(foldersStore, folder.id);
       }
     }
@@ -514,7 +539,6 @@ class SSESharedWorkerImpl implements WorkerAPI {
           parentId: item.parentId || undefined,
           isFavorite: item.favorite || false,
           namespace,
-          isTemporary: false,
           createdAt: now,
           updatedAt: now
         };
@@ -526,13 +550,17 @@ class SSESharedWorkerImpl implements WorkerAPI {
           parentId: item.parentId || undefined,
           isOpen: item.open || false,
           namespace,
-          isTemporary: false,
           createdAt: now,
           updatedAt: now
         };
         await this.putInStore(foldersStore, folder);
       }
     }
+  }
+
+  private isUUID(id: string): boolean {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(id);
   }
 
   async fetchInitialData(namespace: string): Promise<void> {
@@ -703,11 +731,9 @@ class SSESharedWorkerImpl implements WorkerAPI {
         // Create fresh stores
         const bookmarksStore = db.createObjectStore('bookmarks', { keyPath: 'id' });
         bookmarksStore.createIndex('namespace', 'namespace');
-        bookmarksStore.createIndex('isTemporary', 'isTemporary');
         
         const foldersStore = db.createObjectStore('folders', { keyPath: 'id' });
         foldersStore.createIndex('namespace', 'namespace');
-        foldersStore.createIndex('isTemporary', 'isTemporary');
         
         const operationsStore = db.createObjectStore('operations', { keyPath: 'id' });
         operationsStore.createIndex('namespace', 'namespace');
@@ -910,7 +936,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
         case 'item_deleted':
         case 'folder_deleted':
         case 'bookmark_deleted': {
-          const itemId = data.id as string | number;
+          const itemId = data.id as string;
           if (itemId) {
             console.log(`Deleting item ${itemId} from local state due to server event`);
             
@@ -933,17 +959,16 @@ class SSESharedWorkerImpl implements WorkerAPI {
         }
         
         case 'folder_created': {
-          const folderId = data.id as string | number;
+          const folderId = data.id as string;
           const folderName = data.name as string;
           if (folderId && folderName) {
             console.log(`Adding folder ${folderId} to local state due to server event`);
             const folder: StoredFolder = {
               id: folderId,
               name: folderName,
-              parentId: data.parentId as number | undefined,
+              parentId: data.parentId as string | undefined,
               isOpen: (data.isOpen as boolean) || false,
               namespace,
-              isTemporary: false,
               createdAt: (data.createdAt as number) || now,
               updatedAt: (data.updatedAt as number) || now
             };
@@ -954,7 +979,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
         }
         
         case 'bookmark_created': {
-          const bookmarkId = data.id as string | number;
+          const bookmarkId = data.id as string;
           const bookmarkName = data.name as string;
           const bookmarkUrl = data.url as string;
           if (bookmarkId && bookmarkName && bookmarkUrl) {
@@ -963,10 +988,9 @@ class SSESharedWorkerImpl implements WorkerAPI {
               id: bookmarkId,
               name: bookmarkName,
               url: bookmarkUrl,
-              parentId: data.parentId as number | undefined,
+              parentId: data.parentId as string | undefined,
               isFavorite: (data.isFavorite as boolean) || false,
               namespace,
-              isTemporary: false,
               createdAt: (data.createdAt as number) || now,
               updatedAt: (data.updatedAt as number) || now
             };
@@ -977,8 +1001,8 @@ class SSESharedWorkerImpl implements WorkerAPI {
         }
         
         case 'item_moved': {
-          const itemId = data.id as string | number;
-          const newParentId = data.newParentId as number | undefined;
+          const itemId = data.id as string;
+          const newParentId = data.newParentId as string | undefined;
           if (itemId && newParentId !== undefined) {
             console.log(`Moving item ${itemId} to parent ${newParentId} due to server event`);
             const [bookmark, folder] = await Promise.all([
@@ -1008,7 +1032,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
         }
         
         case 'folder_toggled': {
-          const folderId = data.id as string | number;
+          const folderId = data.id as string;
           const isOpen = data.isOpen as boolean;
           if (folderId && isOpen !== undefined) {
             console.log(`Toggling folder ${folderId} open state to ${isOpen} due to server event`);
@@ -1026,7 +1050,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
         }
         
         case 'bookmark_favorite_toggled': {
-          const bookmarkId = data.id as string | number;
+          const bookmarkId = data.id as string;
           const isFavorite = data.isFavorite as boolean;
           if (bookmarkId && isFavorite !== undefined) {
             console.log(`Toggling bookmark ${bookmarkId} favorite state to ${isFavorite} due to server event`);
@@ -1295,12 +1319,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
       await this.markOperationsFailed(failedIds);
     }
     
-    // Handle ID mappings if provided in appliedOp.mappedIds
-    for (const appliedOp of applied) {
-      if (appliedOp.mappedIds && Object.keys(appliedOp.mappedIds).length > 0) {
-        await this.applyIdMappings(appliedOp.mappedIds);
-      }
-    }
+    // No more ID mapping needed with UUIDs!
     
     await this.updatePendingCount(namespace);
     this.emit('dataChanged', { namespace });
@@ -1338,65 +1357,6 @@ class SSESharedWorkerImpl implements WorkerAPI {
           operation.status = 'failed';
           operation.retryCount = (operation.retryCount || 0) + 1;
           store.put(operation);
-        }
-      };
-    }
-  }
-
-  private async applyIdMappings(mappings: Record<string, number>): Promise<void> {
-    if (!this.db || !mappings) return;
-    
-    const transaction = this.db.transaction(['bookmarks', 'folders', 'operations'], 'readwrite');
-    const bookmarksStore = transaction.objectStore('bookmarks');
-    const foldersStore = transaction.objectStore('folders');
-    const operationsStore = transaction.objectStore('operations');
-    
-    for (const [tempId, realId] of Object.entries(mappings)) {
-      // Update bookmarks
-      const bookmarkRequest = bookmarksStore.get(tempId);
-      bookmarkRequest.onsuccess = () => {
-        const bookmark = bookmarkRequest.result;
-        if (bookmark) {
-          bookmarksStore.delete(tempId);
-          bookmark.id = realId;
-          bookmark.isTemporary = false;
-          bookmarksStore.put(bookmark);
-        }
-      };
-      
-      // Update folders
-      const folderRequest = foldersStore.get(tempId);
-      folderRequest.onsuccess = () => {
-        const folder = folderRequest.result;
-        if (folder) {
-          foldersStore.delete(tempId);
-          folder.id = realId;
-          folder.isTemporary = false;
-          foldersStore.put(folder);
-        }
-      };
-      
-      // Update operations that reference this ID
-      const operationRequest = operationsStore.getAll();
-      operationRequest.onsuccess = () => {
-        const operations = operationRequest.result;
-        for (const op of operations) {
-          const payload = JSON.parse(op.payload);
-          let changed = false;
-          
-          if (payload.id === tempId) {
-            payload.id = realId;
-            changed = true;
-          }
-          if (payload.parentId === tempId) {
-            payload.parentId = realId;
-            changed = true;
-          }
-          
-          if (changed) {
-            op.payload = JSON.stringify(payload);
-            operationsStore.put(op);
-          }
         }
       };
     }
@@ -1462,7 +1422,7 @@ class SSESharedWorkerImpl implements WorkerAPI {
   private async deleteChildrenRecursively(
     bookmarksStore: IDBObjectStore, 
     foldersStore: IDBObjectStore, 
-    parentId: string | number, 
+    parentId: string, 
     namespace: string
   ): Promise<void> {
     // Find all children (both bookmarks and folders) with this parentId
@@ -1518,15 +1478,26 @@ interface SharedWorkerEvent extends MessageEvent {
   ports: MessagePort[];
 }
 
+// Singleton worker instance shared across all tabs
+let sharedWorkerInstance: SSESharedWorkerImpl | null = null;
+
+function getSharedWorkerInstance(): SSESharedWorkerImpl {
+  if (!sharedWorkerInstance) {
+    sharedWorkerInstance = new SSESharedWorkerImpl();
+    console.log('Created new shared SSE worker instance');
+  }
+  return sharedWorkerInstance;
+}
+
 self.addEventListener('connect', (event: Event) => {
   const connectEvent = event as SharedWorkerEvent;
   const port = connectEvent.ports[0];
   
-  // Create a new worker instance for this connection
-  const worker = new SSESharedWorkerImpl();
+  // Get the singleton worker instance
+  const worker = getSharedWorkerInstance();
   
   // Expose the worker API via Comlink on this port
   Comlink.expose(worker, port);
   
-  console.log('New SharedWorker connection established with Comlink');
+  console.log('New SharedWorker connection established with Comlink - reusing existing instance');
 });

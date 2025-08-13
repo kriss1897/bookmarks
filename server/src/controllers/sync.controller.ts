@@ -18,12 +18,12 @@ interface SyncResponse {
   applied: {
     operationId: string;
     status: 'success' | 'failed';
-    serverId?: number;
-    tempId?: string | number;
+    serverId?: string;
+    tempId?: string;
     error?: string;
   }[];
   updatedItems: any[]; // Items that were updated/created
-  mappings: Record<string, number>; // tempId -> serverId mappings
+  mappings: Record<string, string>; // tempId -> serverId mappings (now mostly empty with UUIDs)
   serverTimestamp: number;
 }
 
@@ -51,7 +51,7 @@ export class SyncController {
       }
 
       const applied: SyncResponse['applied'] = [];
-      const mappings: Record<string, number> = {};
+      const mappings: Record<string, string> = {};
       const updatedItems: any[] = [];
       const serverTimestamp = Date.now();
 
@@ -71,9 +71,9 @@ export class SyncController {
           
           applied.push(appliedOp);
 
-          // Build ID mappings for temp -> server ID
-          if (result.success && result.tempId && result.serverId) {
-            mappings[result.tempId.toString()] = result.serverId;
+          // With UUIDs, mappings are rarely needed since client generates final IDs
+          if (result.success && result.tempId && result.serverId && result.tempId !== result.serverId) {
+            mappings[result.tempId] = result.serverId;
           }
 
           // TODO: Add updated items if needed for state reconciliation
@@ -109,26 +109,26 @@ export class SyncController {
   private async processOperation(
     namespace: string, 
     operation: SyncOperation
-  ): Promise<{ success: boolean; serverId?: number; tempId?: string | number; error?: string }> {
+  ): Promise<{ success: boolean; serverId?: string; tempId?: string; error?: string }> {
     
     switch (operation.type) {
       case 'CREATE_FOLDER': {
         const { id: tempId, name, parentId } = operation.payload;
         
-        // Check if we already processed this operation (idempotency)
-        const existing = await this.bookmarkService.findByTempId(namespace, tempId);
+        // With UUIDs, check if item already exists (idempotency)
+        const existing = await this.itemExists(namespace, tempId);
         if (existing) {
           return {
             success: true,
-            serverId: existing.id,
+            serverId: tempId,
             tempId
           };
         }
 
-        const folder = await this.bookmarkService.createFolderWithTempId(namespace, {
+        const folder = await this.bookmarkService.createFolderWithId(namespace, {
+          id: tempId,
           name,
-          parentId: parentId || null,
-          tempId
+          parentId: parentId || null
         });
 
         // Broadcast the folder creation event
@@ -148,22 +148,22 @@ export class SyncController {
       case 'CREATE_BOOKMARK': {
         const { id: tempId, name, url, parentId, isFavorite = false } = operation.payload;
         
-        // Check if we already processed this operation (idempotency)
-        const existing = await this.bookmarkService.findByTempId(namespace, tempId);
+        // With UUIDs, check if item already exists (idempotency)
+        const existing = await this.itemExists(namespace, tempId);
         if (existing) {
           return {
             success: true,
-            serverId: existing.id,
+            serverId: tempId,
             tempId
           };
         }
 
-        const bookmark = await this.bookmarkService.createBookmarkWithTempId(namespace, {
+        const bookmark = await this.bookmarkService.createBookmarkWithId(namespace, {
+          id: tempId,
           title: name,
           url,
           parentId: parentId || null,
-          favorite: isFavorite,
-          tempId
+          favorite: isFavorite
         });
 
         // Broadcast the bookmark creation event
@@ -183,9 +183,9 @@ export class SyncController {
       case 'UPDATE_FOLDER': {
         const { id, name, isOpen } = operation.payload;
         
-        // Resolve temp ID to server ID if needed
-        const serverId = await this.resolveId(namespace, id);
-        if (!serverId) {
+        // With UUIDs, ID is final - no resolution needed
+        const itemExists = await this.itemExists(namespace, id);
+        if (!itemExists) {
           return {
             success: false,
             error: 'Item not found'
@@ -196,14 +196,14 @@ export class SyncController {
         if (name !== undefined) updates.name = name;
         if (isOpen !== undefined) updates.open = isOpen;
 
-        await this.bookmarkService.updateItem(namespace, serverId, updates);
+        await this.bookmarkService.updateItem(namespace, id, updates);
 
         // If this is a toggle operation, broadcast the folder toggle event
         if (isOpen !== undefined) {
           this.eventPublisher.publishToNamespace(namespace, {
             type: 'folder_toggled',
             data: { 
-              folderId: serverId, 
+              folderId: id, 
               open: isOpen 
             },
             timestamp: new Date().toISOString(),
@@ -212,16 +212,16 @@ export class SyncController {
 
         return {
           success: true,
-          serverId
+          serverId: id
         };
       }
 
       case 'UPDATE_BOOKMARK': {
         const { id, name, url, isFavorite } = operation.payload;
         
-        // Resolve temp ID to server ID if needed
-        const serverId = await this.resolveId(namespace, id);
-        if (!serverId) {
+        // With UUIDs, ID is final - no resolution needed
+        const itemExists = await this.itemExists(namespace, id);
+        if (!itemExists) {
           return {
             success: false,
             error: 'Item not found'
@@ -233,14 +233,14 @@ export class SyncController {
         if (url !== undefined) updates.url = url;
         if (isFavorite !== undefined) updates.favorite = isFavorite;
 
-        await this.bookmarkService.updateItem(namespace, serverId, updates);
+        await this.bookmarkService.updateItem(namespace, id, updates);
 
         // If this is a favorite toggle operation, broadcast the event
         if (isFavorite !== undefined) {
           this.eventPublisher.publishToNamespace(namespace, {
             type: 'bookmark_favorite_toggled',
             data: { 
-              bookmarkId: serverId, 
+              bookmarkId: id, 
               favorite: isFavorite 
             },
             timestamp: new Date().toISOString(),
@@ -249,75 +249,92 @@ export class SyncController {
 
         return {
           success: true,
-          serverId
+          serverId: id
         };
       }
 
       case 'DELETE_ITEM': {
         const { id } = operation.payload;
         
-        // Resolve temp ID to server ID if needed
-        const serverId = await this.resolveId(namespace, id);
-        if (!serverId) {
+        // With UUIDs, check if item exists
+        const itemExists = await this.itemExists(namespace, id);
+        if (!itemExists) {
           // Item already deleted or doesn't exist - that's fine for idempotency
           return {
-            success: true
+            success: true,
+            serverId: id
           };
         }
 
-        await this.bookmarkService.deleteItem(serverId);
+        await this.bookmarkService.deleteItem(id);
 
         // Broadcast the item deletion event
         this.eventPublisher.publishToNamespace(namespace, {
           type: 'item_deleted',
-          data: { itemId: serverId },
+          data: { itemId: id },
           timestamp: new Date().toISOString(),
         });
 
         return {
           success: true,
-          serverId
+          serverId: id
         };
       }
 
       case 'MOVE_ITEM': {
         const { id, newParentId, afterId } = operation.payload;
         
-        // Resolve all IDs
-        const serverId = await this.resolveId(namespace, id);
-        if (!serverId) {
+        // With UUIDs, no ID resolution needed - validate existence
+        const itemExists = await this.itemExists(namespace, id);
+        if (!itemExists) {
           return {
             success: false,
             error: 'Item not found'
           };
         }
 
-        let resolvedNewParentId: number | null = null;
+        // Validate parent exists if specified
         if (newParentId !== undefined && newParentId !== null) {
-          resolvedNewParentId = await this.resolveId(namespace, newParentId);
+          const parentExists = await this.itemExists(namespace, newParentId);
+          if (!parentExists) {
+            return {
+              success: false,
+              error: 'Parent item not found'
+            };
+          }
         }
 
-        let resolvedAfterId: number | undefined = undefined;
+        // Validate after item exists if specified
         if (afterId !== undefined && afterId !== null) {
-          resolvedAfterId = await this.resolveId(namespace, afterId) || undefined;
+          const afterExists = await this.itemExists(namespace, afterId);
+          if (!afterExists) {
+            return {
+              success: false,
+              error: 'After item not found'
+            };
+          }
         }
 
-        await this.bookmarkService.moveItem(serverId, resolvedNewParentId, resolvedAfterId);
+        await this.bookmarkService.moveItem(
+          id, 
+          newParentId || null, 
+          afterId || undefined
+        );
 
         // Broadcast the item move event
         this.eventPublisher.publishToNamespace(namespace, {
           type: 'item_moved',
           data: { 
-            itemId: serverId, 
-            newParentId: resolvedNewParentId, 
-            afterItemId: resolvedAfterId || null 
+            itemId: id, 
+            newParentId: newParentId || null, 
+            afterItemId: afterId || null 
           },
           timestamp: new Date().toISOString(),
         });
 
         return {
           success: true,
-          serverId
+          serverId: id
         };
       }
 
@@ -329,17 +346,14 @@ export class SyncController {
     }
   }
 
-  // Helper function to resolve temp IDs to server IDs
-  private async resolveId(
-    namespace: string, 
-    id: string | number
-  ): Promise<number | null> {
-    if (typeof id === 'number') {
-      return id; // Already a server ID
+  // Helper function to check if an item exists
+  private async itemExists(namespace: string, id: string): Promise<boolean> {
+    try {
+      const items = await this.bookmarkService.getNamespaceItems(namespace);
+      return items.some(item => item.id === id);
+    } catch (error) {
+      console.error('Error checking if item exists:', error);
+      return false;
     }
-
-    // It's a temp ID, resolve it
-    const item = await this.bookmarkService.findByTempId(namespace, id);
-    return item ? item.id : null;
   }
 }

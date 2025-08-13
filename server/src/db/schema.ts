@@ -3,12 +3,12 @@ import { relations } from 'drizzle-orm';
 
 // Forward declare nodes for self-references
 const nodes = sqliteTable('nodes', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+  id: text('id').primaryKey(), // Changed from integer with autoIncrement to text for UUIDs
   namespace: text('namespace').notNull(),
   type: text('type', { enum: ['folder', 'bookmark'] }).notNull(),
-  parentId: integer('parent_id'),
-  prevSiblingId: integer('prev_sibling_id'),
-  nextSiblingId: integer('next_sibling_id'),
+  parentId: text('parent_id'), // Changed from integer to text
+  prevSiblingId: text('prev_sibling_id'), // Changed from integer to text
+  nextSiblingId: text('next_sibling_id'), // Changed from integer to text
   createdAt: integer('created_at').notNull().$defaultFn(() => Math.floor(Date.now() / 1000)),
   updatedAt: integer('updated_at').notNull().$defaultFn(() => Math.floor(Date.now() / 1000)),
 });
@@ -17,13 +17,13 @@ export { nodes };
 
 // Folder-specific data
 export const folders = sqliteTable('folder', {
-  nodeId: integer('node_id').primaryKey().references(() => nodes.id, { onDelete: 'cascade' }),
+  nodeId: text('node_id').primaryKey().references(() => nodes.id, { onDelete: 'cascade' }), // Changed from integer to text
   name: text('name').notNull(),
 });
 
 // Bookmark-specific data
 export const bookmarks = sqliteTable('bookmarks', {
-  nodeId: integer('node_id').primaryKey().references(() => nodes.id, { onDelete: 'cascade' }),
+  nodeId: text('node_id').primaryKey().references(() => nodes.id, { onDelete: 'cascade' }), // Changed from integer to text
   title: text('title').notNull(),
   url: text('url').notNull(),
   icon: text('icon'),
@@ -33,7 +33,7 @@ export const bookmarks = sqliteTable('bookmarks', {
 // Folder UI state (open/closed) - separate from core entities
 export const folderState = sqliteTable('folder_state', {
   namespace: text('namespace').notNull(),
-  nodeId: integer('node_id').notNull().references(() => nodes.id, { onDelete: 'cascade' }),
+  nodeId: text('node_id').notNull().references(() => nodes.id, { onDelete: 'cascade' }), // Changed from integer to text
   open: integer('open', { mode: 'boolean' }).notNull().default(true),
   updatedAt: integer('updated_at').notNull().$defaultFn(() => Math.floor(Date.now() / 1000)),
 }, (table) => ({

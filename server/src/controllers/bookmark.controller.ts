@@ -21,7 +21,7 @@ export class BookmarkController {
 
       const items = await this.bookmarkService.getNamespaceItems(
         namespace, 
-        parentId ? parseInt(parentId as string) : undefined
+        parentId ? parentId as string : undefined
       );
 
       res.json({ success: true, data: items });
@@ -120,7 +120,7 @@ export class BookmarkController {
       const { newParentId, afterItemId } = req.body;
 
       await this.bookmarkService.moveItem(
-        parseInt(itemId), 
+        itemId, 
         newParentId || null, 
         afterItemId || undefined
       );
@@ -129,7 +129,7 @@ export class BookmarkController {
       this.eventPublisher.publishToNamespace(namespace, {
         type: 'item_moved',
         data: { 
-          itemId: parseInt(itemId), 
+          itemId: itemId, 
           newParentId: newParentId || null, 
           afterItemId: afterItemId || null 
         },
@@ -153,14 +153,14 @@ export class BookmarkController {
 
       const newState = await this.bookmarkService.toggleFolderState(
         namespace, 
-        parseInt(folderId)
+        folderId
       );
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
         type: 'folder_toggled',
         data: { 
-          folderId: parseInt(folderId), 
+          folderId: folderId, 
           open: newState 
         },
         timestamp: new Date().toISOString(),
@@ -182,14 +182,14 @@ export class BookmarkController {
       const { namespace, bookmarkId } = req.params;
 
       const newState = await this.bookmarkService.toggleBookmarkFavorite(
-        parseInt(bookmarkId)
+        bookmarkId
       );
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
         type: 'bookmark_favorite_toggled',
         data: { 
-          bookmarkId: parseInt(bookmarkId), 
+          bookmarkId: bookmarkId, 
           favorite: newState 
         },
         timestamp: new Date().toISOString(),
@@ -210,12 +210,12 @@ export class BookmarkController {
     try {
       const { namespace, itemId } = req.params;
 
-      await this.bookmarkService.deleteItem(parseInt(itemId));
+      await this.bookmarkService.deleteItem(itemId);
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
         type: 'item_deleted',
-        data: { itemId: parseInt(itemId) },
+        data: { itemId: itemId },
         timestamp: new Date().toISOString(),
       });
 
