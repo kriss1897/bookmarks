@@ -26,9 +26,12 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
     try {
       setLoading(true);
       setError(null);
+      console.log('Loading items for namespace:', namespace);
       const data = await bookmarkAPI.getBookmarks(namespace);
+      console.log('Loaded items:', data);
       setItems(data);
     } catch (err) {
+      console.error('Error loading items:', err);
       setError(err instanceof Error ? err.message : 'Failed to load items');
     } finally {
       setLoading(false);
@@ -47,11 +50,26 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
         await connect(namespace);
 
         // Listen for data changes
-        await addEventListener('dataChanged', (data) => {
+        await addEventListener('dataChanged', async (data) => {
           const eventData = data as { namespace: string; type?: string; itemCount?: number };
+          console.log('Received dataChanged event:', eventData);
+          
           if (eventData.namespace === namespace) {
             console.log('Data changed in namespace:', namespace, 'reloading items');
-            loadItems();
+            // Force immediate reload
+            await loadItems();
+          }
+        });
+
+        // Also listen for generic events from SSE
+        await addEventListener('event', async (data) => {
+          const eventData = data as { namespace: string; data?: unknown };
+          console.log('Received SSE event:', eventData);
+          
+          if (eventData.namespace === namespace) {
+            console.log('SSE event received for namespace:', namespace, 'reloading items');
+            // Force immediate reload on any SSE event for this namespace
+            await loadItems();
           }
         });
       } catch (error) {
@@ -103,7 +121,7 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   };
 
   // Toggle folder open/closed
-  const toggleFolder = async (folderId: number) => {
+  const toggleFolder = async (folderId: string) => {
     try {
       const folder = items.find(item => item.id === folderId && item.type === 'folder');
       if (!folder) return;
@@ -116,7 +134,7 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   };
 
   // Toggle bookmark favorite
-  const toggleFavorite = async (bookmarkId: number) => {
+  const toggleFavorite = async (bookmarkId: string) => {
     try {
       const bookmark = items.find(item => item.id === bookmarkId && item.type === 'bookmark');
       if (!bookmark) return;
@@ -129,7 +147,7 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   };
 
   // Delete item
-  const deleteItem = async (itemId: number) => {
+  const deleteItem = async (itemId: string) => {
     if (!window.confirm('Are you sure you want to delete this item?')) return;
     
     try {
@@ -151,8 +169,20 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Bookmarks for "{namespace}"</h2>
+        <h2 className="text-lg font-semibold">
+          Bookmarks for "{namespace}" 
+          <span className="text-sm text-gray-500 ml-2">
+            (Last updated: {new Date().toLocaleTimeString()})
+          </span>
+        </h2>
         <div className="flex gap-2">
+          <Button
+            onClick={loadItems}
+            variant="outline"
+            size="sm"
+          >
+            🔄 Refresh
+          </Button>
           <Button
             onClick={() => setShowAddForm('folder')}
             variant="outline"

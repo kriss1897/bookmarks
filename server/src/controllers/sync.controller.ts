@@ -76,8 +76,8 @@ export class SyncController {
             mappings[result.tempId] = result.serverId;
           }
 
-          // TODO: Add updated items if needed for state reconciliation
-          // updatedItems.push(...);
+          // Since we're broadcasting events via SSE, clients will be notified
+          // of changes and can fetch updated data as needed
           
         } catch (error) {
           console.error(`Error processing operation ${operation.id}:`, error);
@@ -134,7 +134,12 @@ export class SyncController {
         // Broadcast the folder creation event
         this.eventPublisher.publishToNamespace(namespace, {
           type: 'folder_created',
-          data: folder,
+          id: folder.id,
+          name: folder.name,
+          parentId: folder.parentId,
+          isOpen: folder.open,
+          createdAt: folder.createdAt,
+          updatedAt: folder.updatedAt,
           timestamp: new Date().toISOString(),
         });
 
@@ -169,7 +174,13 @@ export class SyncController {
         // Broadcast the bookmark creation event
         this.eventPublisher.publishToNamespace(namespace, {
           type: 'bookmark_created',
-          data: bookmark,
+          id: bookmark.id,
+          name: bookmark.title,
+          url: bookmark.url,
+          parentId: bookmark.parentId,
+          isFavorite: bookmark.favorite,
+          createdAt: bookmark.createdAt,
+          updatedAt: bookmark.updatedAt,
           timestamp: new Date().toISOString(),
         });
 
@@ -202,10 +213,8 @@ export class SyncController {
         if (isOpen !== undefined) {
           this.eventPublisher.publishToNamespace(namespace, {
             type: 'folder_toggled',
-            data: { 
-              folderId: id, 
-              open: isOpen 
-            },
+            id: id,
+            isOpen: isOpen,
             timestamp: new Date().toISOString(),
           });
         }
@@ -239,10 +248,8 @@ export class SyncController {
         if (isFavorite !== undefined) {
           this.eventPublisher.publishToNamespace(namespace, {
             type: 'bookmark_favorite_toggled',
-            data: { 
-              bookmarkId: id, 
-              favorite: isFavorite 
-            },
+            id: id,
+            isFavorite: isFavorite,
             timestamp: new Date().toISOString(),
           });
         }
@@ -271,7 +278,7 @@ export class SyncController {
         // Broadcast the item deletion event
         this.eventPublisher.publishToNamespace(namespace, {
           type: 'item_deleted',
-          data: { itemId: id },
+          id: id,
           timestamp: new Date().toISOString(),
         });
 
@@ -324,11 +331,9 @@ export class SyncController {
         // Broadcast the item move event
         this.eventPublisher.publishToNamespace(namespace, {
           type: 'item_moved',
-          data: { 
-            itemId: id, 
-            newParentId: newParentId || null, 
-            afterItemId: afterId || null 
-          },
+          id: id,
+          newParentId: newParentId || null,
+          afterItemId: afterId || null,
           timestamp: new Date().toISOString(),
         });
 
