@@ -4,7 +4,7 @@ import { EventPublisher } from './services/EventPublisher.js';
 import { APIRoutes } from './routes/api.routes.js';
 import { SSERoutes } from './routes/sse.routes.js';
 import { BookmarkRoutes } from './routes/bookmark.routes.js';
-import { syncRouter } from './routes/sync.routes.js';
+import { createSyncRouter } from './routes/sync.routes.js';
 import { initializeDatabase, closeDatabase } from './db/connection.js';
 
 // Initialize database
@@ -46,7 +46,7 @@ app.put('/api/bookmarks/:namespace/folders/:folderId', bookmarkRoutes.updateFold
 app.get('/api/events', sseRoutes.handleSSEConnection);
 
 // Sync Route (for offline-first operations)
-app.use('/api/sync', syncRouter);
+app.use('/api/sync', createSyncRouter(eventPublisher));
 
 // Graceful shutdown
 process.on('SIGTERM', () => {

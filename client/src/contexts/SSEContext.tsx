@@ -150,9 +150,55 @@ export function SSEProvider({ children }: SSEProviderProps) {
       case 'event': {
         // Handle SSE events broadcasted from shared worker
         const eventData = message.data as SSEMessage;
+        
+        // Filter out noise events that don't provide user value
+        const noisyEventTypes = ['connection', 'heartbeat', 'close', 'cleanup', 'forced_cleanup'];
+        if (noisyEventTypes.includes(eventData.type)) {
+          return; // Don't add these to the message list
+        }
+        
         setSseMessages(prev => [...prev.slice(-9), {
           ...eventData,
           id: eventData.id || Date.now().toString()
+        }]);
+        break;
+      }
+        
+      case 'dataChanged': {
+        // Handle data change events from offline-first worker
+        // These are internal sync events - don't show them in the UI as they're too noisy
+        console.debug('Data changed in another tab');
+        break;
+      }
+        
+      case 'initialDataLoaded': {
+        // Handle initial data loaded events from offline-first worker
+        const eventData = message.data as { namespace: string; itemCount: number };
+        
+        // Only show this if there were actually items loaded, otherwise it's just noise
+        if (eventData.itemCount > 0) {
+          setSseMessages(prev => [...prev.slice(-9), {
+            type: 'initialDataLoaded',
+            message: `Loaded ${eventData.itemCount} items`,
+            timestamp: new Date().toISOString(),
+            id: Date.now().toString(),
+            namespace: eventData.namespace,
+            data: eventData
+          }]);
+        }
+        break;
+      }
+        
+      case 'initialDataError': {
+        // Handle initial data error events from offline-first worker
+        const eventData = message.data as { namespace: string; error: string };
+        setSseMessages(prev => [...prev.slice(-9), {
+          type: 'initialDataError',
+          message: `Failed to load initial data: ${eventData.error}`,
+          timestamp: new Date().toISOString(),
+          id: Date.now().toString(),
+          namespace: eventData.namespace,
+          data: eventData
         }]);
         break;
       }

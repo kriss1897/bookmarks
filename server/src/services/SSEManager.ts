@@ -11,7 +11,7 @@ export class SSEManager implements ISSEManager {
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private connectionCleanupInterval: NodeJS.Timeout | null = null;
   private readonly HEARTBEAT_INTERVAL = 30000; // 30 seconds
-  private readonly CONNECTION_CLEANUP_INTERVAL = 60000; // 1 minute (better for testing)
+  private readonly CONNECTION_CLEANUP_INTERVAL = 60000 * 60; // 1 hour
 
   constructor() {
     this.startHeartbeat();
@@ -32,19 +32,8 @@ export class SSEManager implements ISSEManager {
     
     console.log(`SSE connection added (Client #${connection.clientId}, Namespace: ${connection.namespace}). Total connections: ${this.connections.size}`);
     
-    // Send initial connection event
-    this.sendToConnection(connection, {
-      id: this.generateEventId(),
-      type: EventType.CONNECTION,
-      data: {
-        type: 'connection',
-        message: `Connected to SSE (Client #${connection.clientId}, Namespace: ${connection.namespace})`,
-        timestamp: new Date().toISOString(),
-        namespace: connection.namespace
-      },
-      timestamp: new Date().toISOString(),
-      namespace: connection.namespace
-    });
+    // Note: Removed automatic initial connection event to reduce UI noise
+    // The connection is established and functional without needing to notify the client
   }
 
   /**
@@ -146,19 +135,8 @@ export class SSEManager implements ISSEManager {
     console.log(`Manual connection cleanup triggered. Clearing ${connectionCount} connections.`);
     
     if (connectionCount > 0) {
-      // Notify all clients that connections will be reset
-      const cleanupEvent: SSEEvent = {
-        id: this.generateEventId(),
-        type: EventType.CONNECTION,
-        data: {
-          type: 'forced_cleanup',
-          message: 'Manual connection cleanup - will reconnect shortly',
-          timestamp: new Date().toISOString()
-        },
-        timestamp: new Date().toISOString()
-      };
-
-      this.broadcastEvent(cleanupEvent);
+      // Note: Removed cleanup event notification to reduce UI noise
+      // This is an administrative operation - users don't need to see it
       
       // Clear all connections after a brief delay
       setTimeout(() => {
@@ -199,21 +177,8 @@ export class SSEManager implements ISSEManager {
     const connectionCount = clientIds.size;
     console.log(`Manual namespace cleanup triggered for "${namespace}". Clearing ${connectionCount} connections.`);
     
-    // Notify all clients in namespace that connections will be reset
-    const cleanupEvent: SSEEvent = {
-      id: this.generateEventId(),
-      type: EventType.CONNECTION,
-      data: {
-        type: 'forced_cleanup',
-        message: `Manual namespace cleanup - will reconnect shortly`,
-        timestamp: new Date().toISOString(),
-        namespace
-      },
-      timestamp: new Date().toISOString(),
-      namespace
-    };
-
-    this.broadcastToNamespace(namespace, cleanupEvent);
+    // Note: Removed cleanup event notification to reduce UI noise
+    // This is an administrative operation - users don't need to see it
     
     // Clear namespace connections after a brief delay
     setTimeout(() => {
@@ -283,21 +248,10 @@ export class SSEManager implements ISSEManager {
       if (connectionCount > 0) {
         console.log(`Performing periodic connection cleanup. Clearing ${connectionCount} connections.`);
         
-        // Notify all clients that connections will be reset
-        const cleanupEvent: SSEEvent = {
-          id: this.generateEventId(),
-          type: EventType.CONNECTION,
-          data: {
-            type: 'cleanup',
-            message: 'Connection cleanup - will reconnect shortly',
-            timestamp: new Date().toISOString()
-          },
-          timestamp: new Date().toISOString()
-        };
-
-        this.broadcastEvent(cleanupEvent);
+        // Note: Removed cleanup event notification to reduce UI noise
+        // Connections will be gracefully closed and clients will automatically reconnect
         
-        // Clear all connections after a brief delay to ensure the cleanup event is sent
+        // Clear all connections after a brief delay
         setTimeout(() => {
           // Gracefully close all connections
           this.connections.forEach((connection, clientId) => {

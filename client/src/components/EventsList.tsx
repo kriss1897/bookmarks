@@ -1,6 +1,10 @@
 import { useSSE } from '../hooks/useSSE'
 
-export function EventsList() {
+interface EventsListProps {
+  variant?: 'default' | 'sidebar'
+}
+
+export function EventsList({ variant = 'default' }: EventsListProps) {
 	const { sseMessages, namespace } = useSSE()
 
 	function getMessageStyle(type: string) {
@@ -18,15 +22,30 @@ export function EventsList() {
 		}
 	}
 
+	// Sort by timestamp descending so latest is on top
+	const messagesDesc = [...sseMessages].sort((a, b) => {
+		const ta = new Date(a.timestamp).getTime()
+		const tb = new Date(b.timestamp).getTime()
+		return tb - ta
+	})
+
+  const containerClasses = variant === 'sidebar'
+    ? 'w-full rounded-lg border bg-white p-3 shadow-sm dark:bg-neutral-900'
+    : 'w-full max-w-2xl rounded-lg border bg-white p-4 shadow-sm dark:bg-neutral-900'
+
+  const scrollAreaClasses = variant === 'sidebar'
+    ? 'h-[calc(100vh-200px)] overflow-y-auto rounded-md border bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-950'
+    : 'max-h-60 overflow-y-auto rounded-md border bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-950'
+
 	return (
-		<div className="w-full max-w-2xl rounded-lg border bg-white p-4 shadow-sm dark:bg-neutral-900">
+		<div className={containerClasses}>
 			<h3 className="text-sm font-semibold mb-2 text-neutral-800 dark:text-neutral-200">
 				Live Events for "{namespace}" ({sseMessages.length}):
 			</h3>
-			<div className="max-h-60 overflow-y-auto rounded-md border bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-950">
+			<div className={scrollAreaClasses}>
 				{sseMessages.length > 0 ? (
 					<div className="space-y-2">
-						{sseMessages.map((msg, index) => (
+						{messagesDesc.map((msg, index) => (
 							<div key={msg.id || index} className={`p-2 rounded text-xs border-l-4 ${getMessageStyle(msg.type)}`}>
 								<div className="flex justify-between items-start mb-1">
 									<span className="font-semibold text-neutral-800 uppercase tracking-wide dark:text-neutral-100">

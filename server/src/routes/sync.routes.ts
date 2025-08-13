@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { BookmarkService } from '../db/bookmarkService';
+import { EventPublisher } from '../services/EventPublisher';
 
-export const syncRouter = Router();
+export function createSyncRouter(eventPublisher: EventPublisher) {
+  const syncRouter = Router();
 
 // Types for sync operations
 interface SyncOperation {
@@ -50,7 +52,7 @@ syncRouter.post('/:namespace/operations', async (req: Request, res: Response) =>
     // Process operations in order (important for consistency)
     for (const operation of operations) {
       try {
-        const result = await processOperation(bookmarkService, namespace, operation);
+        const result = await processOperation(bookmarkService, namespace, operation, eventPublisher);
         
         // Convert to expected format
         const appliedOp = {
@@ -101,7 +103,8 @@ syncRouter.post('/:namespace/operations', async (req: Request, res: Response) =>
 async function processOperation(
   bookmarkService: BookmarkService, 
   namespace: string, 
-  operation: SyncOperation
+  operation: SyncOperation,
+  eventPublisher: EventPublisher
 ): Promise<{ success: boolean; serverId?: number; tempId?: string | number; error?: string }> {
   
   switch (operation.type) {
@@ -122,6 +125,13 @@ async function processOperation(
         name,
         parentId: parentId || null,
         tempId
+      });
+
+      // Broadcast the folder creation event
+      eventPublisher.publishToNamespace(namespace, {
+        type: 'folder_created',
+        data: folder,
+        timestamp: new Date().toISOString(),
       });
 
       return {
@@ -152,6 +162,13 @@ async function processOperation(
         tempId
       });
 
+      // Broadcast the bookmark creation event
+      eventPublisher.publishToNamespace(namespace, {
+        type: 'bookmark_created',
+        data: bookmark,
+        timestamp: new Date().toISOString(),
+      });
+
       return {
         success: true,
         serverId: bookmark.id,
@@ -176,6 +193,18 @@ async function processOperation(
       if (isOpen !== undefined) updates.open = isOpen;
 
       await bookmarkService.updateItem(namespace, serverId, updates);
+
+      // If this is a toggle operation, broadcast the folder toggle event
+      if (isOpen !== undefined) {
+        eventPublisher.publishToNamespace(namespace, {
+          type: 'folder_toggled',
+          data: { 
+            folderId: serverId, 
+            open: isOpen 
+          },
+          timestamp: new Date().toISOString(),
+        });
+      }
 
       return {
         success: true,
@@ -202,6 +231,18 @@ async function processOperation(
 
       await bookmarkService.updateItem(namespace, serverId, updates);
 
+      // If this is a favorite toggle operation, broadcast the event
+      if (isFavorite !== undefined) {
+        eventPublisher.publishToNamespace(namespace, {
+          type: 'bookmark_favorite_toggled',
+          data: { 
+            bookmarkId: serverId, 
+            favorite: isFavorite 
+          },
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       return {
         success: true,
         serverId
@@ -221,6 +262,13 @@ async function processOperation(
       }
 
       await bookmarkService.deleteItem(serverId);
+
+      // Broadcast the item deletion event
+      eventPublisher.publishToNamespace(namespace, {
+        type: 'item_deleted',
+        data: { itemId: serverId },
+        timestamp: new Date().toISOString(),
+      });
 
       return {
         success: true,
@@ -252,6 +300,17 @@ async function processOperation(
 
       await bookmarkService.moveItem(serverId, resolvedNewParentId, resolvedAfterId);
 
+      // Broadcast the item move event
+      eventPublisher.publishToNamespace(namespace, {
+        type: 'item_moved',
+        data: { 
+          itemId: serverId, 
+          newParentId: resolvedNewParentId, 
+          afterItemId: resolvedAfterId || null 
+        },
+        timestamp: new Date().toISOString(),
+      });
+
       return {
         success: true,
         serverId
@@ -279,4 +338,7 @@ async function resolveId(
   // It's a temp ID, resolve it
   const item = await bookmarkService.findByTempId(namespace, id);
   return item ? item.id : null;
+}
+
+  return syncRouter;
 }

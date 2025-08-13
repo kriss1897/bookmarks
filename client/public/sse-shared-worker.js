@@ -808,8 +808,8 @@ class SSESharedWorker {
       });
       
       eventSource.addEventListener('heartbeat', (event) => {
-        // Don't broadcast heartbeats to reduce noise
-        console.log(`Heartbeat received for namespace: ${connectionManager.namespace}`);
+        // Don't broadcast heartbeats to reduce noise - they're just keep-alive signals
+        console.debug(`Heartbeat received for namespace: ${connectionManager.namespace}`);
       });
       
       eventSource.addEventListener('close', (event) => {
