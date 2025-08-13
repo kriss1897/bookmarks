@@ -35,6 +35,11 @@ export function EventLogBridge() {
 
         await addEventListener('event', (data) => {
           const eventData = data as { namespace: string; data: unknown; type: string; timestamp: string; id: string };
+          
+          if(eventData.type === 'connected') {
+            return;
+          }
+          
           addEvent({
             type: eventData.type || 'event',
             message: eventData.data ? JSON.stringify(eventData.data) : 'SSE Event',

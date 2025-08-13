@@ -46,6 +46,22 @@ export class EventsController {
     // Add connection to manager
     this.sseManager.addConnection(connection);
 
+    // Send initial connection confirmation event
+    const connectionEvent = {
+      id: `${Date.now()}-${clientId}`,
+      event: 'connection',
+      data: JSON.stringify({
+        type: 'connected',
+        clientId,
+        namespace: namespace.trim(),
+        timestamp: new Date().toISOString(),
+        message: 'Events connection established successfully'
+      })
+    };
+    
+    const sseData = `id: ${connectionEvent.id}\nevent: ${connectionEvent.event}\ndata: ${connectionEvent.data}\n\n`;
+    res.write(sseData);
+
     // Handle client disconnect
     req.on('close', () => {
       console.log(`SSE client disconnected (Client #${clientId}, Namespace: ${namespace})`);
@@ -53,6 +69,10 @@ export class EventsController {
     });
 
     req.on('error', (err) => {
+      if (err.message === 'aborted') {
+        return
+      }
+
       console.error(`SSE connection error for Client #${clientId}, Namespace: ${namespace}:`, err);
       this.sseManager.removeConnection(clientId);
     });

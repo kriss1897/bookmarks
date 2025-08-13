@@ -1,24 +1,17 @@
-import { IEventsManager, EventsConnection, ServerEvent, EventType } from '../types/events.js';
+import { IEventsManager, EventsConnection, ServerEvent } from '../types/events.js';
 
 /**
- * SSE Manager following Single Responsibility Principle
- * Responsible only for managing SSE connections and broadcasting events
+ * Events Manager following Single Responsibility Principle
+ * Responsible only for managing event connections and broadcasting events
  */
 export class EventsManager implements IEventsManager {
   private connections: Map<number, EventsConnection> = new Map();
   private namespaceConnections: Map<string, Set<number>> = new Map(); // Track connections by namespace
-  private heartbeatInterval: NodeJS.Timeout | null = null;
-  private connectionCleanupInterval: NodeJS.Timeout | null = null;
-  private readonly HEARTBEAT_INTERVAL = 30000; // 30 seconds
-  private readonly CONNECTION_CLEANUP_INTERVAL = 60000 * 60; // 1 hour
 
-  constructor() {
-    this.startHeartbeat();
-    this.startConnectionCleanup();
-  }
+  constructor() {}
 
   /**
-   * Add a new SSE connection
+   * Add a new SSE connection with disconnect detection
    */
   addConnection(connection: EventsConnection): void {
     this.connections.set(connection.clientId, connection);
@@ -29,10 +22,12 @@ export class EventsManager implements IEventsManager {
     }
     this.namespaceConnections.get(connection.namespace)!.add(connection.clientId);
     
+    // Set up disconnect detection
+    this.setupDisconnectDetection(connection);
+    
     console.log(`SSE connection added (Client #${connection.clientId}, Namespace: ${connection.namespace}). Total connections: ${this.connections.size}`);
     
-    // Note: Removed automatic initial connection event to reduce UI noise
-    // The connection is established and functional without needing to notify the client
+    // Note: Connection is established and functional without needing to notify the client
   }
 
   /**
@@ -126,172 +121,54 @@ export class EventsManager implements IEventsManager {
   }
 
   /**
-   * Manually trigger connection cleanup
-   * Useful for testing or administrative purposes
-   */
-  forceCleanup(): void {
-    const connectionCount = this.connections.size;
-    console.log(`Manual connection cleanup triggered. Clearing ${connectionCount} connections.`);
-    
-    if (connectionCount > 0) {
-      // Note: Removed cleanup event notification to reduce UI noise
-      // This is an administrative operation - users don't need to see it
-      
-      // Clear all connections after a brief delay
-      setTimeout(() => {
-        // Gracefully close all connections
-        this.connections.forEach((connection, clientId) => {
-          try {
-            // Send a final close event before ending the connection
-            const closeData = `id: ${this.generateEventId()}\nevent: close\ndata: {"type":"connection_closing"}\n\n`;
-            connection.response.write(closeData);
-            
-            // Close the connection after a small delay
-            setTimeout(() => {
-              connection.response.end();
-            }, 500);
-          } catch (error) {
-            console.error(`Error closing connection for client #${clientId}:`, error);
-          }
-        });
-        
-        this.connections.clear();
-        console.log(`Manual cleanup completed. Active clients will reconnect.`);
-      }, 3000); // Increased delay to 3 seconds for better message delivery
-    }
-  }
-
-  /**
-   * Manually trigger connection cleanup for a specific namespace
-   * Useful for testing or administrative purposes
-   */
-  forceCleanupNamespace(namespace: string): void {
-    const clientIds = this.namespaceConnections.get(namespace);
-    
-    if (!clientIds || clientIds.size === 0) {
-      console.log(`No connections found in namespace: ${namespace}`);
-      return;
-    }
-
-    const connectionCount = clientIds.size;
-    console.log(`Manual namespace cleanup triggered for "${namespace}". Clearing ${connectionCount} connections.`);
-    
-    // Note: Removed cleanup event notification to reduce UI noise
-    // This is an administrative operation - users don't need to see it
-    
-    // Clear namespace connections after a brief delay
-    setTimeout(() => {
-      // Gracefully close connections in this namespace
-      const currentClientIds = [...clientIds]; // Create copy as we'll be modifying the set
-      currentClientIds.forEach(clientId => {
-        const connection = this.connections.get(clientId);
-        if (connection) {
-          try {
-            // Send a final close event before ending the connection
-            const closeData = `id: ${this.generateEventId()}\nevent: close\ndata: {"type":"connection_closing","namespace":"${namespace}"}\n\n`;
-            connection.response.write(closeData);
-            
-            // Close the connection after a small delay
-            setTimeout(() => {
-              connection.response.end();
-            }, 500);
-          } catch (error) {
-            console.error(`Error closing connection for client #${clientId} in namespace ${namespace}:`, error);
-          }
-        }
-        
-        // Remove from tracking
-        this.removeConnection(clientId);
-      });
-      
-      console.log(`Manual namespace cleanup completed for "${namespace}". Active clients will reconnect.`);
-    }, 3000); // Increased delay to 3 seconds for better message delivery
-  }
-
-  /**
-   * Send event to a specific connection
+   * Send event to a specific connection with validation
    */
   private sendToConnection(connection: EventsConnection, event: ServerEvent): void {
     const response = connection.response;
-    const sseData = `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
-    response.write(sseData);
+    
+    // Check if the response is still writable
+    if (!response.writable) {
+      throw new Error(`Connection ${connection.clientId} is no longer writable`);
+    }
+    
+    try {
+      const sseData = `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
+      response.write(sseData);
+    } catch (error) {
+      throw new Error(`Failed to write to connection ${connection.clientId}: ${error}`);
+    }
   }
 
   /**
-   * Start heartbeat to keep connections alive
+   * Set up automatic detection of client disconnections
    */
-  private startHeartbeat(): void {
-    this.heartbeatInterval = setInterval(() => {
-      const heartbeatEvent: ServerEvent = {
-        id: this.generateEventId(),
-        type: EventType.HEARTBEAT,
-        data: {
-          type: 'heartbeat',
-          message: 'Heartbeat',
-          timestamp: new Date().toISOString()
-        },
-        timestamp: new Date().toISOString()
-      };
-
-      this.broadcastEvent(heartbeatEvent);
-    }, this.HEARTBEAT_INTERVAL);
-  }
-
-  /**
-   * Start periodic connection cleanup
-   * Clears all connections at regular intervals - active clients will reconnect
-   */
-  private startConnectionCleanup(): void {
-    this.connectionCleanupInterval = setInterval(() => {
-      const connectionCount = this.connections.size;
-      if (connectionCount > 0) {
-        console.log(`Performing periodic connection cleanup. Clearing ${connectionCount} connections.`);
-        
-        // Note: Removed cleanup event notification to reduce UI noise
-        // Connections will be gracefully closed and clients will automatically reconnect
-        
-        // Clear all connections after a brief delay
-        setTimeout(() => {
-          // Gracefully close all connections
-          this.connections.forEach((connection, clientId) => {
-            try {
-              // Send a final close event before ending the connection
-              const closeData = `id: ${this.generateEventId()}\nevent: close\ndata: {"type":"connection_closing"}\n\n`;
-              connection.response.write(closeData);
-              
-              // Close the connection after a small delay
-              setTimeout(() => {
-                connection.response.end();
-              }, 500);
-            } catch (error) {
-              console.error(`Error closing connection for client #${clientId}:`, error);
-            }
-          });
-          
-          this.connections.clear();
-          console.log(`Connection cleanup completed. Active clients will reconnect.`);
-        }, 3000); // Increased delay to 3 seconds for better message delivery
-      }
-    }, this.CONNECTION_CLEANUP_INTERVAL);
-  }
-
-  /**
-   * Generate unique event ID
-   */
-  private generateEventId(): string {
-    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  private setupDisconnectDetection(connection: EventsConnection): void {
+    const { response, clientId } = connection;
+    
+    // Detect when client closes the connection
+    response.on('close', () => {
+      console.log(`Client #${clientId} disconnected (close event)`);
+      this.removeConnection(clientId);
+    });
+    
+    // Detect when connection ends
+    response.on('finish', () => {
+      console.log(`Client #${clientId} connection finished`);
+      this.removeConnection(clientId);
+    });
+    
+    // Detect connection errors
+    response.on('error', (error) => {
+      console.error(`Client #${clientId} connection error:`, error);
+      this.removeConnection(clientId);
+    });
   }
 
   /**
    * Cleanup resources
    */
   destroy(): void {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-    }
-    if (this.connectionCleanupInterval) {
-      clearInterval(this.connectionCleanupInterval);
-    }
     this.connections.clear();
+    this.namespaceConnections.clear();
   }
 }

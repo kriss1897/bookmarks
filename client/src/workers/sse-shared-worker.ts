@@ -389,6 +389,15 @@ class SSESharedWorkerImpl implements WorkerAPI {
         
         case 'DELETE_ITEM': {
           const payload = operation.payload as DeleteItemPayload;
+          
+          // First check if it's a folder, and if so, recursively delete all children
+          const folderToDelete = await this.getFromStore(foldersStore, payload.id);
+          if (folderToDelete) {
+            // Recursively delete all children of this folder
+            await this.deleteChildrenRecursively(bookmarksStore, foldersStore, payload.id, operation.namespace);
+          }
+          
+          // Delete the item itself (folder or bookmark)
           await Promise.all([
             this.deleteFromStore(bookmarksStore, payload.id),
             this.deleteFromStore(foldersStore, payload.id)
@@ -866,6 +875,9 @@ class SSESharedWorkerImpl implements WorkerAPI {
       
       const actualEventType = data.type || eventType;
       
+      // Handle server events that should update local state
+      this.handleServerStateUpdate(namespace, actualEventType, data);
+      
       this.emit('event', {
         namespace,
         data: {
@@ -879,6 +891,160 @@ class SSESharedWorkerImpl implements WorkerAPI {
       
     } catch (error) {
       console.error(`Error parsing SSE ${eventType} event:`, error);
+    }
+  }
+
+  /**
+   * Handle server events that should update local IndexedDB state
+   */
+  private async handleServerStateUpdate(namespace: string, eventType: string, data: Record<string, unknown>): Promise<void> {
+    if (!this.db) return;
+    
+    try {
+      const transaction = this.db.transaction(['bookmarks', 'folders'], 'readwrite');
+      const bookmarksStore = transaction.objectStore('bookmarks');
+      const foldersStore = transaction.objectStore('folders');
+      const now = Date.now();
+      
+      switch (eventType) {
+        case 'item_deleted':
+        case 'folder_deleted':
+        case 'bookmark_deleted': {
+          const itemId = data.id as string | number;
+          if (itemId) {
+            console.log(`Deleting item ${itemId} from local state due to server event`);
+            
+            // Check if it's a folder and delete children recursively
+            const folderToDelete = await this.getFromStore(foldersStore, itemId);
+            if (folderToDelete) {
+              await this.deleteChildrenRecursively(bookmarksStore, foldersStore, itemId, namespace);
+            }
+            
+            // Delete the item itself
+            await Promise.all([
+              this.deleteFromStore(bookmarksStore, itemId),
+              this.deleteFromStore(foldersStore, itemId)
+            ]);
+            
+            // Emit data changed event so UI updates
+            this.emit('dataChanged', { namespace, type: 'serverUpdate' });
+          }
+          break;
+        }
+        
+        case 'folder_created': {
+          const folderId = data.id as string | number;
+          const folderName = data.name as string;
+          if (folderId && folderName) {
+            console.log(`Adding folder ${folderId} to local state due to server event`);
+            const folder: StoredFolder = {
+              id: folderId,
+              name: folderName,
+              parentId: data.parentId as number | undefined,
+              isOpen: (data.isOpen as boolean) || false,
+              namespace,
+              isTemporary: false,
+              createdAt: (data.createdAt as number) || now,
+              updatedAt: (data.updatedAt as number) || now
+            };
+            await this.putInStore(foldersStore, folder);
+            this.emit('dataChanged', { namespace, type: 'serverUpdate' });
+          }
+          break;
+        }
+        
+        case 'bookmark_created': {
+          const bookmarkId = data.id as string | number;
+          const bookmarkName = data.name as string;
+          const bookmarkUrl = data.url as string;
+          if (bookmarkId && bookmarkName && bookmarkUrl) {
+            console.log(`Adding bookmark ${bookmarkId} to local state due to server event`);
+            const bookmark: StoredBookmark = {
+              id: bookmarkId,
+              name: bookmarkName,
+              url: bookmarkUrl,
+              parentId: data.parentId as number | undefined,
+              isFavorite: (data.isFavorite as boolean) || false,
+              namespace,
+              isTemporary: false,
+              createdAt: (data.createdAt as number) || now,
+              updatedAt: (data.updatedAt as number) || now
+            };
+            await this.putInStore(bookmarksStore, bookmark);
+            this.emit('dataChanged', { namespace, type: 'serverUpdate' });
+          }
+          break;
+        }
+        
+        case 'item_moved': {
+          const itemId = data.id as string | number;
+          const newParentId = data.newParentId as number | undefined;
+          if (itemId && newParentId !== undefined) {
+            console.log(`Moving item ${itemId} to parent ${newParentId} due to server event`);
+            const [bookmark, folder] = await Promise.all([
+              this.getFromStore(bookmarksStore, itemId),
+              this.getFromStore(foldersStore, itemId)
+            ]);
+
+            if (bookmark) {
+              await this.putInStore(bookmarksStore, {
+                ...bookmark,
+                parentId: newParentId,
+                updatedAt: now
+              });
+              this.emit('dataChanged', { namespace, type: 'serverUpdate' });
+            }
+
+            if (folder) {
+              await this.putInStore(foldersStore, {
+                ...folder,
+                parentId: newParentId,
+                updatedAt: now
+              });
+              this.emit('dataChanged', { namespace, type: 'serverUpdate' });
+            }
+          }
+          break;
+        }
+        
+        case 'folder_toggled': {
+          const folderId = data.id as string | number;
+          const isOpen = data.isOpen as boolean;
+          if (folderId && isOpen !== undefined) {
+            console.log(`Toggling folder ${folderId} open state to ${isOpen} due to server event`);
+            const folder = await this.getFromStore(foldersStore, folderId);
+            if (folder) {
+              await this.putInStore(foldersStore, {
+                ...folder,
+                isOpen: isOpen,
+                updatedAt: now
+              });
+              this.emit('dataChanged', { namespace, type: 'serverUpdate' });
+            }
+          }
+          break;
+        }
+        
+        case 'bookmark_favorite_toggled': {
+          const bookmarkId = data.id as string | number;
+          const isFavorite = data.isFavorite as boolean;
+          if (bookmarkId && isFavorite !== undefined) {
+            console.log(`Toggling bookmark ${bookmarkId} favorite state to ${isFavorite} due to server event`);
+            const bookmark = await this.getFromStore(bookmarksStore, bookmarkId);
+            if (bookmark) {
+              await this.putInStore(bookmarksStore, {
+                ...bookmark,
+                isFavorite: isFavorite,
+                updatedAt: now
+              });
+              this.emit('dataChanged', { namespace, type: 'serverUpdate' });
+            }
+          }
+          break;
+        }
+      }
+    } catch (error) {
+      console.error(`Error handling server state update for ${eventType}:`, error);
     }
   }
 
@@ -1291,6 +1457,34 @@ class SSESharedWorkerImpl implements WorkerAPI {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
+  }
+
+  private async deleteChildrenRecursively(
+    bookmarksStore: IDBObjectStore, 
+    foldersStore: IDBObjectStore, 
+    parentId: string | number, 
+    namespace: string
+  ): Promise<void> {
+    // Find all children (both bookmarks and folders) with this parentId
+    const bookmarks = await this.getAllFromStore(bookmarksStore, 'namespace', namespace) as StoredBookmark[];
+    const folders = await this.getAllFromStore(foldersStore, 'namespace', namespace) as StoredFolder[];
+    
+    // Delete all bookmarks that are children of this folder
+    for (const bookmark of bookmarks) {
+      if (bookmark.parentId === parentId) {
+        await this.deleteFromStore(bookmarksStore, bookmark.id);
+      }
+    }
+    
+    // For folders that are children, recursively delete their children too
+    for (const folder of folders) {
+      if (folder.parentId === parentId) {
+        // Recursively delete this subfolder's children first
+        await this.deleteChildrenRecursively(bookmarksStore, foldersStore, folder.id, namespace);
+        // Then delete the subfolder itself
+        await this.deleteFromStore(foldersStore, folder.id);
+      }
+    }
   }
 
   private async putInStore(store: IDBObjectStore, value: StoredBookmark | StoredFolder | Record<string, unknown>): Promise<unknown> {

@@ -44,6 +44,4 @@ export interface IEventsManager {
   broadcastToNamespace(namespace: string, event: ServerEvent): void;
   getConnectionCount(): number;
   getConnectionCountByNamespace(namespace: string): number;
-  forceCleanup(): void;
-  forceCleanupNamespace(namespace: string): void;
 }
