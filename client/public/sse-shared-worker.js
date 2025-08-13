@@ -234,6 +234,36 @@ class SSESharedWorker {
         this.handleSSEEvent(connectionManager.namespace, 'close', event);
       });
       
+      // Handle bookmark-related events
+      eventSource.addEventListener('folder_created', (event) => {
+        this.handleSSEEvent(connectionManager.namespace, 'folder_created', event);
+      });
+      
+      eventSource.addEventListener('bookmark_created', (event) => {
+        this.handleSSEEvent(connectionManager.namespace, 'bookmark_created', event);
+      });
+      
+      eventSource.addEventListener('item_moved', (event) => {
+        this.handleSSEEvent(connectionManager.namespace, 'item_moved', event);
+      });
+      
+      eventSource.addEventListener('folder_toggled', (event) => {
+        this.handleSSEEvent(connectionManager.namespace, 'folder_toggled', event);
+      });
+      
+      eventSource.addEventListener('bookmark_favorite_toggled', (event) => {
+        this.handleSSEEvent(connectionManager.namespace, 'bookmark_favorite_toggled', event);
+      });
+      
+      eventSource.addEventListener('item_deleted', (event) => {
+        this.handleSSEEvent(connectionManager.namespace, 'item_deleted', event);
+      });
+      
+      // Also listen for general message events to catch any other events
+      eventSource.onmessage = (event) => {
+        this.handleSSEEvent(connectionManager.namespace, 'message', event);
+      };
+      
       eventSource.onerror = () => {
         console.error(`SSE connection error for namespace: ${connectionManager.namespace}`);
         connectionManager.isConnecting = false;
@@ -259,14 +289,19 @@ class SSESharedWorker {
       const data = JSON.parse(event.data);
       console.log(`SSE ${eventType} event for namespace ${namespace}:`, data);
       
+      // Use the actual event type from the data if it exists, otherwise use the eventType parameter
+      const actualEventType = data.type || eventType;
+      
       // Broadcast event to all tabs in this namespace
       this.broadcastToNamespace(namespace, {
         type: 'event',
         namespace,
         data: {
           ...data,
-          eventType,
-          id: Date.now().toString()
+          type: actualEventType,
+          eventType: actualEventType,
+          id: data.id || Date.now().toString(),
+          timestamp: data.timestamp || new Date().toISOString()
         }
       });
       

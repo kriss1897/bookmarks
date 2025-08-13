@@ -1,9 +1,10 @@
 import { SSEProvider } from './contexts/SSEContext'
 import { DragDropProvider } from './contexts/DragDropContext'
 import { NamespaceSelector } from './components/NamespaceSelector'
-import { SSEControls } from './components/SSEControls'
-import { EventsList } from './components/EventsList'
-import { DragDropDemo } from './components/DragDropDemo'
+import { BookmarkManager } from './components/BookmarkManager'
+// import { SSEControls } from './components/SSEControls'
+// import { EventsList } from './components/EventsList'
+// import { DragDropDemo } from './components/DragDropDemo'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useSSE } from './hooks/useSSE'
 
@@ -11,8 +12,8 @@ function AppContent() {
   const { namespace } = useSSE();
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center p-4">
-      <h1 className="text-2xl text-black text-center mb-4">Bookmarks</h1>
+    <div className="flex min-h-svh flex-col items-center justify-start p-4">
+      <h1 className="text-3xl font-bold text-center mb-6">Bookmarks Manager</h1>
 
       {/* Namespace Selection */}
       <NamespaceSelector />
@@ -20,15 +21,9 @@ function AppContent() {
       {/* Only show other components when connected to a namespace */}
       {namespace && (
         <>
-          {/* SSE Connection Status and Controls */}
-          <SSEControls />
-          
-          {/* Message Display */}
-          <EventsList />
-
-          {/* Drag and Drop Demo */}
-          <div className="mt-8">
-            <DragDropDemo />
+          {/* Main Bookmark Management UI */}
+          <div className="w-full mb-8">
+            <BookmarkManager namespace={namespace} />
           </div>
         </>
       )}

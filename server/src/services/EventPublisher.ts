@@ -28,6 +28,26 @@ export class EventPublisher implements IEventPublisher {
   }
 
   /**
+   * Publish an event to all clients in a specific namespace
+   */
+  publishToNamespace(namespace: string, data: any): void {
+    const event: SSEEvent = {
+      id: this.generateEventId(),
+      type: data.type || 'update',
+      data: {
+        ...data,
+        namespace,
+        timestamp: data.timestamp || new Date().toISOString(),
+      },
+      timestamp: new Date().toISOString(),
+      namespace
+    };
+
+    console.log(`Publishing event to namespace "${namespace}": ${data.type}`);
+    this.sseManager.broadcastToNamespace(namespace, event);
+  }
+
+  /**
    * Generate unique event ID
    */
   private generateEventId(): string {

@@ -3,12 +3,30 @@ import { SSEManager } from './services/SSEManager.js';
 import { EventPublisher } from './services/EventPublisher.js';
 import { APIRoutes } from './routes/api.routes.js';
 import { SSERoutes } from './routes/sse.routes.js';
+import { BookmarkRoutes } from './routes/bookmark.routes.js';
+import { initializeDatabase, closeDatabase } from './db/connection.js';
+
+// Initialize database
+await initializeDatabase();
 
 // Initialize services directly
 const sseManager = new SSEManager();
 const eventPublisher = new EventPublisher(sseManager);
 const apiRoutes = new APIRoutes(eventPublisher, sseManager);
 const sseRoutes = new SSERoutes(sseManager);
+const bookmarkRoutes = new BookmarkRoutes(eventPublisher);
+
+// Debug: check if all methods exist
+console.log('BookmarkRoutes methods:');
+console.log('getItems:', typeof bookmarkRoutes.getItems);
+console.log('createFolder:', typeof bookmarkRoutes.createFolder);
+console.log('createBookmark:', typeof bookmarkRoutes.createBookmark);
+console.log('moveItem:', typeof bookmarkRoutes.moveItem);
+console.log('toggleFolderState:', typeof bookmarkRoutes.toggleFolderState);
+console.log('toggleBookmarkFavorite:', typeof bookmarkRoutes.toggleBookmarkFavorite);
+console.log('deleteItem:', typeof bookmarkRoutes.deleteItem);
+console.log('updateBookmark:', typeof bookmarkRoutes.updateBookmark);
+console.log('updateFolder:', typeof bookmarkRoutes.updateFolder);
 
 const app = express();
 
@@ -24,6 +42,17 @@ app.post('/api/notify', apiRoutes.sendNotification);
 app.get('/api/connections', apiRoutes.getConnections);
 app.post('/api/cleanup', apiRoutes.forceCleanup);
 
+// Bookmark API Routes
+app.get('/api/bookmarks/:namespace', bookmarkRoutes.getItems);
+app.post('/api/bookmarks/:namespace/folders', bookmarkRoutes.createFolder);
+app.post('/api/bookmarks/:namespace/bookmarks', bookmarkRoutes.createBookmark);
+app.put('/api/bookmarks/:namespace/items/:itemId/move', bookmarkRoutes.moveItem);
+app.put('/api/bookmarks/:namespace/folders/:folderId/toggle', bookmarkRoutes.toggleFolderState);
+app.put('/api/bookmarks/:namespace/bookmarks/:bookmarkId/favorite', bookmarkRoutes.toggleBookmarkFavorite);
+app.delete('/api/bookmarks/:namespace/items/:itemId', bookmarkRoutes.deleteItem);
+app.put('/api/bookmarks/:namespace/bookmarks/:bookmarkId', bookmarkRoutes.updateBookmark);
+app.put('/api/bookmarks/:namespace/folders/:folderId', bookmarkRoutes.updateFolder);
+
 // SSE Route
 app.get('/api/events', sseRoutes.handleSSEConnection);
 
@@ -31,12 +60,14 @@ app.get('/api/events', sseRoutes.handleSSEConnection);
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
   sseManager.destroy();
+  closeDatabase();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   console.log('SIGINT received, shutting down gracefully');
   sseManager.destroy();
+  closeDatabase();
   process.exit(0);
 });
 
