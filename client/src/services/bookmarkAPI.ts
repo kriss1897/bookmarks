@@ -217,13 +217,33 @@ export class BookmarkAPI {
   // where immediate server response is needed (e.g., initial load, export)
 
   // Direct HTTP request to get items (bypasses offline system)
-  async getItemsDirect(namespace: string): Promise<BookmarkItem[]> {
-    const response = await fetch(`${this.baseURL}/namespaces/${encodeURIComponent(namespace)}/items`);
+  async getItemsDirect(namespace: string, parentId?: string): Promise<BookmarkItem[]> {
+    const url = new URL(`${this.baseURL}/bookmarks/${encodeURIComponent(namespace)}`, window.location.origin);
+    if (parentId !== undefined) {
+      url.searchParams.set('parentId', parentId);
+    }
+    
+    const response = await fetch(url.toString());
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     const data = await response.json();
     return data.success ? data.data : [];
+  }
+
+  // Get items at a specific level (direct children of a parent folder)
+  async getItemsByParent(namespace: string, parentId: string | null = null): Promise<BookmarkItem[]> {
+    return this.getItemsDirect(namespace, parentId || undefined);
+  }
+
+  // Get root-level items (items with no parent)
+  async getRootItems(namespace: string): Promise<BookmarkItem[]> {
+    return this.getItemsByParent(namespace, null);
+  }
+
+  // Get direct children of a specific folder
+  async getFolderChildren(namespace: string, folderId: string): Promise<BookmarkItem[]> {
+    return this.getItemsByParent(namespace, folderId);
   }
 
   // Legacy methods (now proxy to offline-first versions for backwards compatibility)

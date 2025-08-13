@@ -1,8 +1,6 @@
-import { Request, Response } from 'express';
-import { BookmarkService, BookmarkItem } from '../services/bookmarkService.js';
-import { EventPublisher } from '../services/EventPublisher.js';
-import { db } from '../db/connection.js';
-import { nodes, folders } from '../db/schema.js';
+import { Request, Response } from "express";
+import { BookmarkService } from "../services/bookmark.service.js";
+import { EventPublisher } from "../services/EventPublisher.js";
 
 export class BookmarkController {
   private bookmarkService: BookmarkService;
@@ -20,16 +18,16 @@ export class BookmarkController {
       const { parentId } = req.query;
 
       const items = await this.bookmarkService.getNamespaceItems(
-        namespace, 
-        parentId ? parentId as string : undefined
+        namespace,
+        parentId ? (parentId as string) : undefined
       );
 
       res.json({ success: true, data: items });
     } catch (error) {
-      console.error('Error getting items:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to get items' 
+      console.error("Error getting items:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to get items",
       });
     }
   };
@@ -40,18 +38,20 @@ export class BookmarkController {
       const { namespace } = req.params;
       const { name, parentId, orderIndex } = req.body;
 
-      console.log('Creating folder request:', { namespace, name, parentId });
+      console.log("Creating folder request:", { namespace, name, parentId });
 
-      if (!name || typeof name !== 'string') {
-        res.status(400).json({ 
-          success: false, 
-          error: 'Folder name is required' 
+      if (!name || typeof name !== "string") {
+        res.status(400).json({
+          success: false,
+          error: "Folder name is required",
         });
         return;
       }
 
-      if (!orderIndex || typeof orderIndex !== 'string') {
-        res.status(400).json({ success: false, error: 'orderIndex is required' });
+      if (!orderIndex || typeof orderIndex !== "string") {
+        res
+          .status(400)
+          .json({ success: false, error: "orderIndex is required" });
         return;
       }
 
@@ -64,24 +64,24 @@ export class BookmarkController {
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
-  type: 'folder_created',
-  id: folder.id,
-  name: folder.name,
-  parentId: folder.parentId,
-  orderIndex: folder.orderIndex,
-  isOpen: folder.open,
-  createdAt: folder.createdAt,
-  updatedAt: folder.updatedAt,
-  timestamp: new Date().toISOString(),
+        type: "folder_created",
+        id: folder.id,
+        name: folder.name,
+        parentId: folder.parentId,
+        orderIndex: folder.orderIndex,
+        isOpen: folder.open,
+        createdAt: folder.createdAt,
+        updatedAt: folder.updatedAt,
+        timestamp: new Date().toISOString(),
       });
 
       res.status(201).json({ success: true, data: folder });
     } catch (error) {
-      console.error('Error creating folder:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to create folder',
-        details: error instanceof Error ? error.message : String(error)
+      console.error("Error creating folder:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to create folder",
+        details: error instanceof Error ? error.message : String(error),
       });
     }
   };
@@ -92,16 +92,23 @@ export class BookmarkController {
       const { namespace } = req.params;
       const { title, url, icon, parentId, orderIndex } = req.body;
 
-      if (!title || !url || typeof title !== 'string' || typeof url !== 'string') {
-        res.status(400).json({ 
-          success: false, 
-          error: 'Title and URL are required' 
+      if (
+        !title ||
+        !url ||
+        typeof title !== "string" ||
+        typeof url !== "string"
+      ) {
+        res.status(400).json({
+          success: false,
+          error: "Title and URL are required",
         });
         return;
       }
 
-      if (!orderIndex || typeof orderIndex !== 'string') {
-        res.status(400).json({ success: false, error: 'orderIndex is required' });
+      if (!orderIndex || typeof orderIndex !== "string") {
+        res
+          .status(400)
+          .json({ success: false, error: "orderIndex is required" });
         return;
       }
 
@@ -116,24 +123,24 @@ export class BookmarkController {
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
-  type: 'bookmark_created',
-  id: bookmark.id,
-  name: bookmark.title,
-  url: bookmark.url,
-  parentId: bookmark.parentId,
-  orderIndex: bookmark.orderIndex,
-  isFavorite: bookmark.favorite,
-  createdAt: bookmark.createdAt,
-  updatedAt: bookmark.updatedAt,
-  timestamp: new Date().toISOString(),
+        type: "bookmark_created",
+        id: bookmark.id,
+        name: bookmark.title,
+        url: bookmark.url,
+        parentId: bookmark.parentId,
+        orderIndex: bookmark.orderIndex,
+        isFavorite: bookmark.favorite,
+        createdAt: bookmark.createdAt,
+        updatedAt: bookmark.updatedAt,
+        timestamp: new Date().toISOString(),
       });
 
       res.status(201).json({ success: true, data: bookmark });
     } catch (error) {
-      console.error('Error creating bookmark:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to create bookmark' 
+      console.error("Error creating bookmark:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to create bookmark",
       });
     }
   };
@@ -144,16 +151,22 @@ export class BookmarkController {
       const { namespace, itemId } = req.params;
       const { newParentId, targetOrderIndex } = req.body;
 
-      if (!targetOrderIndex || typeof targetOrderIndex !== 'string') {
-        res.status(400).json({ success: false, error: 'targetOrderIndex is required' });
+      if (!targetOrderIndex || typeof targetOrderIndex !== "string") {
+        res
+          .status(400)
+          .json({ success: false, error: "targetOrderIndex is required" });
         return;
       }
 
-      await this.bookmarkService.moveItem(itemId, newParentId || null, targetOrderIndex);
+      await this.bookmarkService.moveItem(
+        itemId,
+        newParentId || null,
+        targetOrderIndex
+      );
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
-        type: 'item_moved',
+        type: "item_moved",
         id: itemId,
         newParentId: newParentId || null,
         targetOrderIndex,
@@ -162,10 +175,10 @@ export class BookmarkController {
 
       res.json({ success: true });
     } catch (error) {
-      console.error('Error moving item:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to move item' 
+      console.error("Error moving item:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to move item",
       });
     }
   };
@@ -176,13 +189,13 @@ export class BookmarkController {
       const { namespace, folderId } = req.params;
 
       const newState = await this.bookmarkService.toggleFolderState(
-        namespace, 
+        namespace,
         folderId
       );
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
-        type: 'folder_toggled',
+        type: "folder_toggled",
         id: folderId,
         isOpen: newState,
         timestamp: new Date().toISOString(),
@@ -190,16 +203,19 @@ export class BookmarkController {
 
       res.json({ success: true, data: { open: newState } });
     } catch (error) {
-      console.error('Error toggling folder state:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to toggle folder state' 
+      console.error("Error toggling folder state:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to toggle folder state",
       });
     }
   };
 
   // Toggle bookmark favorite status
-  toggleBookmarkFavorite = async (req: Request, res: Response): Promise<void> => {
+  toggleBookmarkFavorite = async (
+    req: Request,
+    res: Response
+  ): Promise<void> => {
     try {
       const { namespace, bookmarkId } = req.params;
 
@@ -209,7 +225,7 @@ export class BookmarkController {
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
-        type: 'bookmark_favorite_toggled',
+        type: "bookmark_favorite_toggled",
         id: bookmarkId,
         isFavorite: newState,
         timestamp: new Date().toISOString(),
@@ -217,10 +233,10 @@ export class BookmarkController {
 
       res.json({ success: true, data: { favorite: newState } });
     } catch (error) {
-      console.error('Error toggling bookmark favorite:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to toggle bookmark favorite' 
+      console.error("Error toggling bookmark favorite:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to toggle bookmark favorite",
       });
     }
   };
@@ -234,17 +250,17 @@ export class BookmarkController {
 
       // Broadcast the change to all connected clients
       this.eventPublisher.publishToNamespace(namespace, {
-        type: 'item_deleted',
+        type: "item_deleted",
         id: itemId,
         timestamp: new Date().toISOString(),
       });
 
       res.json({ success: true });
     } catch (error) {
-      console.error('Error deleting item:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to delete item' 
+      console.error("Error deleting item:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to delete item",
       });
     }
   };
@@ -257,16 +273,16 @@ export class BookmarkController {
 
       // For now, we'll implement a simple update
       // In a real implementation, you'd add this method to BookmarkService
-      
-      res.status(501).json({ 
-        success: false, 
-        error: 'Update bookmark not yet implemented' 
+
+      res.status(501).json({
+        success: false,
+        error: "Update bookmark not yet implemented",
       });
     } catch (error) {
-      console.error('Error updating bookmark:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to update bookmark' 
+      console.error("Error updating bookmark:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to update bookmark",
       });
     }
   };
@@ -279,16 +295,16 @@ export class BookmarkController {
 
       // For now, we'll implement a simple update
       // In a real implementation, you'd add this method to BookmarkService
-      
-      res.status(501).json({ 
-        success: false, 
-        error: 'Update folder not yet implemented' 
+
+      res.status(501).json({
+        success: false,
+        error: "Update folder not yet implemented",
       });
     } catch (error) {
-      console.error('Error updating folder:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to update folder' 
+      console.error("Error updating folder:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to update folder",
       });
     }
   };
