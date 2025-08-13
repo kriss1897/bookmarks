@@ -1,8 +1,7 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
 import { EventsManager } from './services/EventsManager.js';
 import { EventPublisher } from './services/EventPublisher.js';
-import { APIController } from './controllers/api.controller.js';
-import { SSEController } from './controllers/sse.controller.js';
+import { EventsController } from './controllers/events.controller.js';
 import { BookmarkController } from './controllers/bookmark.controller.js';
 import { SyncController } from './controllers/sync.controller.js';
 import { initializeDatabase, closeDatabase } from './db/connection.js';
@@ -10,11 +9,12 @@ import { initializeDatabase, closeDatabase } from './db/connection.js';
 // Initialize database
 await initializeDatabase();
 
-// Initialize services directly
+// Initialize events module
 const eventsManager = new EventsManager();
 const eventPublisher = new EventPublisher(eventsManager);
-const apiController = new APIController(eventPublisher, eventsManager);
-const sseController = new SSEController(eventsManager);
+
+// Initialize services directly
+const eventsController = new EventsController(eventsManager);
 const bookmarkController = new BookmarkController(eventPublisher);
 const syncController = new SyncController(eventPublisher);
 
@@ -36,7 +36,7 @@ app.put('/api/bookmarks/:namespace/bookmarks/:bookmarkId', bookmarkController.up
 app.put('/api/bookmarks/:namespace/folders/:folderId', bookmarkController.updateFolder);
 
 // Events Route
-app.get('/api/events', sseController.handleEventsConnection);
+app.get('/api/events', eventsController.handleEventsConnection);
 
 // Sync Route (for offline-first operations)
 app.post('/api/sync/:namespace/operations', syncController.syncOperations);

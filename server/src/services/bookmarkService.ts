@@ -1,7 +1,7 @@
 import { eq, and, isNull, sql } from 'drizzle-orm';
-import { db } from './connection.js';
-import { nodes, folders, bookmarks, folderState } from './schema.js';
-import type { Node, Bookmark, Folder, FolderState } from './schema.js';
+import { db } from '../db/connection.js';
+import { nodes, folders, bookmarks, folderState } from '../db/schema.js';
+import type { Node, Bookmark, Folder, FolderState } from '../db/schema.js';
 
 export interface BookmarkItem {
   id: number;

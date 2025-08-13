@@ -1,7 +1,7 @@
 // Event types and interfaces following SOLID principles
 import { Response } from 'express';
 
-export interface SSEEvent {
+export interface ServerEvent {
   id: string;
   type: string;
   data: any;
@@ -40,8 +40,8 @@ export interface IEventPublisher {
 export interface IEventsManager {
   addConnection(connection: EventsConnection): void;
   removeConnection(clientId: number): void;
-  broadcastEvent(event: SSEEvent): void;
-  broadcastToNamespace(namespace: string, event: SSEEvent): void;
+  broadcastEvent(event: ServerEvent): void;
+  broadcastToNamespace(namespace: string, event: ServerEvent): void;
   getConnectionCount(): number;
   getConnectionCountByNamespace(namespace: string): number;
   forceCleanup(): void;

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { BookmarkService } from '../db/bookmarkService.js';
+import { BookmarkService } from '../services/bookmarkService.js';
 import { EventPublisher } from '../services/EventPublisher.js';
 
 // Types for sync operations

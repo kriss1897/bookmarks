@@ -1,4 +1,4 @@
-import { IEventPublisher, IEventsManager, EventType, SSEEvent } from '../types/events.js';
+import { IEventPublisher, IEventsManager, EventType, ServerEvent } from '../types/events.js';
 
 /**
  * Event Publisher following Single Responsibility Principle
@@ -11,7 +11,7 @@ export class EventPublisher implements IEventPublisher {
    * Publish an event to all connected clients
    */
   publishEvent(eventType: EventType, data: any): void {
-    const event: SSEEvent = {
+    const event: ServerEvent = {
       id: this.generateEventId(),
       type: eventType,
       data: {
@@ -31,7 +31,7 @@ export class EventPublisher implements IEventPublisher {
    * Publish an event to all clients in a specific namespace
    */
   publishToNamespace(namespace: string, data: any): void {
-    const event: SSEEvent = {
+    const event: ServerEvent = {
       id: this.generateEventId(),
       type: data.type || 'update',
       data: {

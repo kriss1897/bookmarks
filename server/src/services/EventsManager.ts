@@ -1,4 +1,4 @@
-import { IEventsManager, EventsConnection, SSEEvent, EventType } from '../types/events.js';
+import { IEventsManager, EventsConnection, ServerEvent, EventType } from '../types/events.js';
 
 /**
  * SSE Manager following Single Responsibility Principle
@@ -58,7 +58,7 @@ export class EventsManager implements IEventsManager {
   /**
    * Broadcast event to all connected clients
    */
-  broadcastEvent(event: SSEEvent): void {
+  broadcastEvent(event: ServerEvent): void {
     const deadConnections: number[] = [];
 
     this.connections.forEach((connection, clientId) => {
@@ -79,7 +79,7 @@ export class EventsManager implements IEventsManager {
   /**
    * Broadcast event to all clients in a specific namespace
    */
-  broadcastToNamespace(namespace: string, event: SSEEvent): void {
+  broadcastToNamespace(namespace: string, event: ServerEvent): void {
     const deadConnections: number[] = [];
     const clientIds = this.namespaceConnections.get(namespace);
     
@@ -211,7 +211,7 @@ export class EventsManager implements IEventsManager {
   /**
    * Send event to a specific connection
    */
-  private sendToConnection(connection: EventsConnection, event: SSEEvent): void {
+  private sendToConnection(connection: EventsConnection, event: ServerEvent): void {
     const response = connection.response;
     const sseData = `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
     response.write(sseData);
@@ -222,7 +222,7 @@ export class EventsManager implements IEventsManager {
    */
   private startHeartbeat(): void {
     this.heartbeatInterval = setInterval(() => {
-      const heartbeatEvent: SSEEvent = {
+      const heartbeatEvent: ServerEvent = {
         id: this.generateEventId(),
         type: EventType.HEARTBEAT,
         data: {

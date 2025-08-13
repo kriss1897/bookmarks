@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { BookmarkService, BookmarkItem } from '../db/bookmarkService.js';
+import { BookmarkService, BookmarkItem } from '../services/bookmarkService.js';
 import { EventPublisher } from '../services/EventPublisher.js';
 import { db } from '../db/connection.js';
 import { nodes, folders } from '../db/schema.js';
