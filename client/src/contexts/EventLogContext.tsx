@@ -34,11 +34,13 @@ export function EventLogProvider({ children }: EventLogProviderProps) {
         const stored = sessionStorage.getItem('event-log');
         if (stored) {
           const parsed = JSON.parse(stored) as EventLogMessage[];
-          // Filter events by TTL (2 hours)
+          // Filter events by TTL (2 hours) and exclude infrastructure events
           const now = Date.now();
           const validEvents = parsed.filter((event) => {
             const eventTime = new Date(event.timestamp).getTime();
-            return now - eventTime < 2 * 60 * 60 * 1000; // 2 hours
+            const isNotExpired = now - eventTime < 2 * 60 * 60 * 1000; // 2 hours
+            const isNotInfrastructureEvent = !['connection', 'reconnection', 'disconnect', 'heartbeat'].includes(event.type);
+            return isNotExpired && isNotInfrastructureEvent;
           });
           setEvents(validEvents);
         }
@@ -53,7 +55,7 @@ export function EventLogProvider({ children }: EventLogProviderProps) {
   // Persist events when they change
   useEffect(() => {
     try {
-      // Only persist last 20 events
+      // Only persist last 20 events (infrastructure events are already filtered out)
       const eventsToPersist = events.slice(-20);
       sessionStorage.setItem('event-log', JSON.stringify(eventsToPersist));
     } catch (error) {
@@ -62,6 +64,12 @@ export function EventLogProvider({ children }: EventLogProviderProps) {
   }, [events]);
 
   const addEvent = (event: EventLogMessage) => {
+    // Only log connection-related and heartbeat events to console, don't add to state
+    if (event.type === 'connection' || event.type === 'reconnection' || event.type === 'disconnect' || event.type === 'heartbeat') {
+      console.log(`[${event.type.toUpperCase()}]`, event.message, event.data ? event.data : '');
+      return;
+    }
+
     setEvents(prev => {
       // Check if event with same ID already exists (prevent duplicates)
       const eventId = event.id || `${event.timestamp}-${event.type}`;

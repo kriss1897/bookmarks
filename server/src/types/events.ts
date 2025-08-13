@@ -36,8 +36,8 @@ export interface IEventPublisher {
   publishEvent(eventType: EventType, data: any): void;
 }
 
-// Interface for SSE manager (Dependency Inversion Principle)
-export interface ISSEManager {
+// Interface for Events manager (Dependency Inversion Principle)
+export interface IEventsManager {
   addConnection(connection: SSEConnection): void;
   removeConnection(clientId: number): void;
   broadcastEvent(event: SSEEvent): void;

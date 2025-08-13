@@ -1,11 +1,10 @@
-import { Response } from 'express';
-import { ISSEManager, SSEConnection, SSEEvent, EventType, EventData } from '../types/events.js';
+import { IEventsManager, SSEConnection, SSEEvent, EventType } from '../types/events.js';
 
 /**
  * SSE Manager following Single Responsibility Principle
  * Responsible only for managing SSE connections and broadcasting events
  */
-export class SSEManager implements ISSEManager {
+export class EventsManager implements IEventsManager {
   private connections: Map<number, SSEConnection> = new Map();
   private namespaceConnections: Map<string, Set<number>> = new Map(); // Track connections by namespace
   private heartbeatInterval: NodeJS.Timeout | null = null;

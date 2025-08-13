@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { ISSEManager, SSEConnection } from '../types/events.js';
+import { IEventsManager, SSEConnection } from '../types/events.js';
 
 /**
  * SSE Route Handler following Single Responsibility Principle
@@ -8,12 +8,12 @@ import { ISSEManager, SSEConnection } from '../types/events.js';
 export class SSERoutes {
   private clientCounter = 0;
 
-  constructor(private sseManager: ISSEManager) {}
+  constructor(private sseManager: IEventsManager) {}
 
   /**
    * GET /api/events?namespace=<namespace> - Server-Sent Events endpoint
    */
-  handleSSEConnection = (req: Request, res: Response): void => {
+  handleEventsConnection = (req: Request, res: Response): void => {
     const clientId = ++this.clientCounter;
     const namespace = req.query.namespace as string || 'default';
     

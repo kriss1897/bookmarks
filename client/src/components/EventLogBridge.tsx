@@ -22,37 +22,15 @@ export function EventLogBridge() {
       try {
         // Bridge all worker events to the event log
         await addEventListener('connected', (data) => {
-          addEvent({
-            type: 'connected',
-            message: `Connected to namespace: ${namespace}`,
-            timestamp: new Date().toISOString(),
-            id: generateUniqueEventId(),
-            namespace,
-            data: data as Record<string, unknown>
-          });
+          console.log(data);
         });
 
         await addEventListener('disconnected', (data) => {
-          addEvent({
-            type: 'disconnected',
-            message: `Disconnected from namespace: ${namespace}`,
-            timestamp: new Date().toISOString(),
-            id: generateUniqueEventId(),
-            namespace,
-            data: data as Record<string, unknown>
-          });
+          console.log(data);
         });
 
         await addEventListener('reconnecting', (data) => {
-          const reconnectData = data as { attempt: number; delayMs: number; nextRetryAt: string };
-          addEvent({
-            type: 'reconnecting',
-            message: `Reconnecting to namespace: ${namespace} (attempt ${reconnectData?.attempt || 1})`,
-            timestamp: new Date().toISOString(),
-            id: generateUniqueEventId(),
-            namespace,
-            data: data as Record<string, unknown>
-          });
+          console.log(data);
         });
 
         await addEventListener('event', (data) => {
