@@ -100,47 +100,47 @@ export function DevTools({ namespace }: DevToolsProps) {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 bg-gray-800 text-white p-4 rounded-lg shadow-lg max-w-sm">
-      <h3 className="text-lg font-bold mb-3">🔧 Dev Tools</h3>
+    <div className="w-full rounded-lg border bg-white p-3 shadow-sm dark:bg-neutral-900 dark:border-neutral-800">
+      <h3 className="text-sm font-semibold mb-3 text-neutral-800 dark:text-neutral-200">🔧 Dev Tools</h3>
       
       <div className="space-y-2">
         <button
           onClick={handleResetDatabase}
           disabled={isResetting}
-          className="w-full bg-red-600 hover:bg-red-700 disabled:bg-red-400 px-3 py-2 rounded text-sm"
+          className="w-full bg-red-600 hover:bg-red-700 disabled:bg-red-400 px-3 py-2 rounded text-xs font-medium text-white transition-colors"
         >
           {isResetting ? 'Resetting...' : 'Reset Database'}
         </button>
         
         <button
           onClick={handleClearStorage}
-          className="w-full bg-orange-600 hover:bg-orange-700 px-3 py-2 rounded text-sm"
+          className="w-full bg-orange-600 hover:bg-orange-700 px-3 py-2 rounded text-xs font-medium text-white transition-colors"
         >
           Clear Storage
         </button>
 
         <button
           onClick={handleClearAllData}
-          className="w-full bg-red-800 hover:bg-red-900 px-3 py-2 rounded text-sm"
+          className="w-full bg-red-800 hover:bg-red-900 px-3 py-2 rounded text-xs font-medium text-white transition-colors"
         >
           Clear ALL Data
         </button>
         
         <button
           onClick={handleForceSync}
-          className="w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-sm"
+          className="w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-xs font-medium text-white transition-colors"
         >
           Force Sync
         </button>
       </div>
       
       {message && (
-        <div className="mt-3 p-2 bg-gray-700 rounded text-xs">
+        <div className="mt-3 p-2 bg-neutral-100 dark:bg-neutral-800 rounded text-xs text-neutral-700 dark:text-neutral-300">
           {message}
         </div>
       )}
       
-      <div className="mt-2 text-xs text-gray-400">
+      <div className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
         Namespace: {namespace}
       </div>
     </div>

@@ -1,10 +1,7 @@
+import * as Comlink from 'comlink';
+import type { WorkerAPI } from '../workers/sse-shared-worker';
 import type { 
-  Operation, 
-  WorkerMessage, 
-  EnqueueOperationMessage,
-  SyncNowMessage,
-  SubscribeMessage,
-  GetStatusMessage
+  Operation
 } from '../types/operations';
 import { 
   generateClientId,
@@ -14,191 +11,135 @@ import {
 
 export class OfflineWorkerService {
   private worker: SharedWorker | null = null;
-  private port: MessagePort | null = null;
-  private messageHandlers = new Map<string, (data: unknown) => void>();
+  private workerAPI: Comlink.Remote<WorkerAPI> | null = null;
   private clientId: string;
-  private eventListeners: Map<string, Set<(event: MessageEvent) => void>> = new Map();
+  private listenerProxyMap = new WeakMap<(data: unknown) => void, Comlink.ProxyMarked>();
 
   constructor() {
     this.clientId = generateClientId();
     this.initializeWorker();
   }
 
-  private initializeWorker() {
+  private async initializeWorker() {
     try {
-      this.worker = new SharedWorker('/sse-shared-worker.js', 'sse-worker');
-      this.port = this.worker.port;
+      this.worker = new SharedWorker(
+        new URL('../workers/sse-shared-worker.ts', import.meta.url),
+        { type: 'module', name: 'sse-worker' }
+      );
       
-      this.port.onmessage = (event: MessageEvent<WorkerMessage>) => {
-        this.handleWorkerMessage(event.data);
-        // Also dispatch as generic event for OfflineIndicator
-        this.dispatchEvent('message', event);
-      };
+      // Wrap the worker port with Comlink
+      this.workerAPI = Comlink.wrap<WorkerAPI>(this.worker.port);
       
-      this.port.start();
-      console.log('OfflineWorkerService initialized');
+      console.log('OfflineWorkerService initialized with Comlink');
     } catch (error) {
       console.error('Failed to initialize SharedWorker:', error);
       // Fallback to local operation queue could be implemented here
     }
   }
 
-  // Event handling for OfflineIndicator
-  addEventListener(type: string, listener: (event: MessageEvent) => void): void {
-    if (!this.eventListeners.has(type)) {
-      this.eventListeners.set(type, new Set());
+  // Event handling methods
+  async addEventListener(type: 'dataChanged' | 'pendingCount' | 'syncStatus' | 'connectivityChanged' | 'connected' | 'disconnected' | 'reconnecting' | 'error' | 'event', 
+                       listener: (data: unknown) => void): Promise<void> {
+    if (!this.workerAPI) return;
+    
+    // Create and store the proxy if it doesn't exist
+    if (!this.listenerProxyMap.has(listener)) {
+      const proxy = Comlink.proxy(listener);
+      this.listenerProxyMap.set(listener, proxy);
     }
-    this.eventListeners.get(type)!.add(listener);
+    
+    const proxy = this.listenerProxyMap.get(listener)! as unknown as (data: unknown) => void;
+    await this.workerAPI.addEventListener(type, proxy);
   }
 
-  removeEventListener(type: string, listener: (event: MessageEvent) => void): void {
-    const listeners = this.eventListeners.get(type);
-    if (listeners) {
-      listeners.delete(listener);
-      if (listeners.size === 0) {
-        this.eventListeners.delete(type);
-      }
+  async removeEventListener(type: 'dataChanged' | 'pendingCount' | 'syncStatus' | 'connectivityChanged' | 'connected' | 'disconnected' | 'reconnecting' | 'error' | 'event', 
+                           listener: (data: unknown) => void): Promise<void> {
+    if (!this.workerAPI) return;
+    
+    // Use the stored proxy for removal
+    const proxy = this.listenerProxyMap.get(listener);
+    if (proxy) {
+      await this.workerAPI.removeEventListener(type, proxy as unknown as (data: unknown) => void);
     }
   }
 
-  private dispatchEvent(type: string, event: MessageEvent): void {
-    const listeners = this.eventListeners.get(type);
-    if (listeners) {
-      listeners.forEach(listener => listener(event));
-    }
+  // Connection management
+  async connect(namespace: string): Promise<void> {
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    await this.workerAPI.connect(namespace);
+  }
+
+  async disconnect(namespace: string): Promise<void> {
+    if (!this.workerAPI) return;
+    await this.workerAPI.disconnect(namespace);
+  }
+
+  async cleanup(namespace?: string): Promise<void> {
+    if (!this.workerAPI) return;
+    await this.workerAPI.cleanup(namespace);
   }
 
   // Request pending operations count
-  async getPendingOperationsCount(namespace: string): Promise<void> {
-    if (!this.port) return;
-    
-    this.port.postMessage({
-      type: 'GET_PENDING_OPERATIONS_COUNT',
-      namespace
-    });
+  async getPendingOperationsCount(namespace: string): Promise<number> {
+    if (!this.workerAPI) return 0;
+    return await this.workerAPI.getPendingOperationsCount(namespace);
   }
 
   // Development utility: reset database to resolve version conflicts
   async resetDatabase(): Promise<void> {
-    if (!this.port) return;
-    
-    return new Promise((resolve, reject) => {
-      if (!this.port) {
-        reject(new Error('Worker not available'));
-        return;
-      }
-
-      const handleResponse = (event: MessageEvent) => {
-        const message = event.data;
-        if (message.type === 'DATABASE_RESET_SUCCESS') {
-          this.port!.removeEventListener('message', handleResponse);
-          resolve();
-        } else if (message.type === 'DATABASE_RESET_ERROR') {
-          this.port!.removeEventListener('message', handleResponse);
-          reject(new Error(message.error));
-        }
-      };
-
-      this.port.addEventListener('message', handleResponse);
-      
-      this.port.postMessage({
-        type: 'RESET_DATABASE'
-      });
-    });
-  }
-
-  private handleWorkerMessage(message: WorkerMessage) {
-    const handler = this.messageHandlers.get(message.type);
-    if (handler && message.data) {
-      handler(message.data);
-    } else {
-      console.log('Unhandled worker message:', message);
-    }
-  }
-
-  // Subscribe to worker events
-  onDataChanged(handler: (data: { namespace: string }) => void) {
-    this.messageHandlers.set('dataChanged', handler as (data: unknown) => void);
-  }
-
-  onPendingCount(handler: (data: { namespace: string; count: number }) => void) {
-    this.messageHandlers.set('pendingCount', handler as (data: unknown) => void);
-  }
-
-  onSyncStatus(handler: (data: { namespace: string; status: string; error?: string }) => void) {
-    this.messageHandlers.set('syncStatus', handler as (data: unknown) => void);
-  }
-
-  onConnectivityChanged(handler: (data: { isOnline: boolean }) => void) {
-    this.messageHandlers.set('connectivityChanged', handler as (data: unknown) => void);
-  }
-
-  onError(handler: (data: { reason: string; operationId?: string }) => void) {
-    this.messageHandlers.set('error', handler as (data: unknown) => void);
+    if (!this.workerAPI) throw new Error('Worker not available');
+    await this.workerAPI.resetDatabase();
   }
 
   // Enqueue an operation for processing
   async enqueueOperation(namespace: string, operation: Omit<Operation, 'clientId'>): Promise<void> {
-    if (!this.port) {
-      throw new Error('Worker not initialized');
-    }
-
-    const fullOperation: Operation = {
-      ...operation,
-      clientId: this.clientId
-    };
-
-    const message: EnqueueOperationMessage = {
-      type: 'enqueueOperation',
-      data: {
-        namespace,
-        operation: fullOperation
-      }
-    };
-
-    this.port.postMessage(message);
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    await this.workerAPI.enqueueOperation(namespace, operation);
   }
 
   // Trigger immediate sync for namespace
   async syncNow(namespace?: string): Promise<void> {
-    if (!this.port) {
-      throw new Error('Worker not initialized');
-    }
-
-    const message: SyncNowMessage = {
-      type: 'syncNow',
-      data: { namespace }
-    };
-
-    this.port.postMessage(message);
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    await this.workerAPI.syncNow(namespace);
   }
 
   // Subscribe to data changes for a namespace
   async subscribe(namespace: string): Promise<void> {
-    if (!this.port) {
-      throw new Error('Worker not initialized');
-    }
-
-    const message: SubscribeMessage = {
-      type: 'subscribe',
-      data: { namespace }
-    };
-
-    this.port.postMessage(message);
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    await this.workerAPI.subscribe(namespace);
   }
 
   // Get current status
-  async getStatus(namespace?: string): Promise<void> {
-    if (!this.port) {
-      throw new Error('Worker not initialized');
-    }
+  async getStatus(namespace?: string): Promise<unknown> {
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    return await this.workerAPI.getStatus(namespace);
+  }
 
-    const message: GetStatusMessage = {
-      type: 'getStatus',
-      data: { namespace }
-    };
+  // Database operations
+  async getNamespaceItems(namespace: string): Promise<unknown[]> {
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    return await this.workerAPI.getNamespaceItems(namespace);
+  }
 
-    this.port.postMessage(message);
+  async getItemById(namespace: string, id: string | number): Promise<unknown> {
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    return await this.workerAPI.getItemById(namespace, id);
+  }
+
+  async applyOperationOptimistically(operation: Operation): Promise<void> {
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    await this.workerAPI.applyOperationOptimistically(operation);
+  }
+
+  async reconcileWithServer(namespace: string, serverItems: unknown[]): Promise<void> {
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    // Cast to any since we need to match the interface but want type safety on our side
+    await this.workerAPI.reconcileWithServer(namespace, serverItems as Parameters<WorkerAPI['reconcileWithServer']>[1]);
+  }
+
+  async fetchInitialData(namespace: string): Promise<void> {
+    if (!this.workerAPI) throw new Error('Worker not initialized');
+    await this.workerAPI.fetchInitialData(namespace);
   }
 
   // Convenience methods for creating operations

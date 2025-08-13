@@ -1,5 +1,6 @@
 import type { Operation } from '../types/operations';
 import type { BookmarkItem } from './bookmarkAPI';
+import { offlineWorkerService } from './offlineWorkerService';
 
 // Extended type for local UI with children support
 export interface LocalBookmarkItem extends BookmarkItem {
@@ -30,88 +31,13 @@ interface LocalDBFolder {
   updatedAt: number;
 }
 
-type LocalDBItem = LocalDBBookmark | LocalDBFolder;
-
-// SharedWorker communication helper
-class SharedWorkerClient {
-  private worker: SharedWorker;
-  private port: MessagePort;
-  private requestId = 0;
-  private pendingRequests = new Map<string, { resolve: (value: unknown) => void; reject: (error: unknown) => void }>();
-
-  constructor() {
-    this.worker = new SharedWorker('/sse-shared-worker.js');
-    this.port = this.worker.port;
-    
-    this.port.onmessage = (event) => {
-      const { requestId, data, error } = event.data;
-      
-      if (requestId && this.pendingRequests.has(requestId)) {
-        const { resolve, reject } = this.pendingRequests.get(requestId)!;
-        this.pendingRequests.delete(requestId);
-        
-        if (error) {
-          reject(new Error(error));
-        } else {
-          resolve(data);
-        }
-      }
-    };
-    
-    this.port.start();
-  }
-
-  private async sendRequest(type: string, data: Record<string, unknown>): Promise<unknown> {
-    const requestId = `req_${++this.requestId}`;
-    
-    return new Promise((resolve, reject) => {
-      this.pendingRequests.set(requestId, { resolve, reject });
-      
-      this.port.postMessage({
-        type,
-        data: { ...data, requestId }
-      });
-      
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        if (this.pendingRequests.has(requestId)) {
-          this.pendingRequests.delete(requestId);
-          reject(new Error('Request timeout'));
-        }
-      }, 10000);
-    });
-  }
-
-  async getNamespaceItems(namespace: string): Promise<LocalDBItem[]> {
-    return this.sendRequest('GET_NAMESPACE_ITEMS', { namespace }) as Promise<LocalDBItem[]>;
-  }
-
-  async applyOperationOptimistically(operation: Operation): Promise<void> {
-    await this.sendRequest('APPLY_OPERATION_OPTIMISTICALLY', { operation });
-  }
-
-  async getById(namespace: string, id: string | number): Promise<LocalBookmarkItem | null> {
-    return this.sendRequest('GET_BY_ID', { namespace, id }) as Promise<LocalBookmarkItem | null>;
-  }
-
-  async reconcileWithServer(namespace: string, serverItems: LocalBookmarkItem[]): Promise<void> {
-    await this.sendRequest('RECONCILE_WITH_SERVER', { namespace, serverItems });
-  }
-
-  async fetchInitialData(namespace: string): Promise<void> {
-    await this.sendRequest('FETCH_INITIAL_DATA', { namespace });
-  }
-}
-
-const workerClient = new SharedWorkerClient();
-
 export class LocalDataService {
   // Get all bookmarks for a namespace
   async getBookmarks(namespace: string): Promise<LocalBookmarkItem[]> {
-    const items = await workerClient.getNamespaceItems(namespace);
+    const items = await offlineWorkerService.getNamespaceItems(namespace) as (LocalDBBookmark | LocalDBFolder)[];
     
     // Convert to BookmarkItem format
-    const bookmarkItems: LocalBookmarkItem[] = items.map(item => {
+    const bookmarkItems: LocalBookmarkItem[] = items.map((item: LocalDBBookmark | LocalDBFolder) => {
       // Check if it's a bookmark by checking for url property
       if ('url' in item && item.url) {
         // It's a bookmark
@@ -153,22 +79,23 @@ export class LocalDataService {
 
   // Apply operation optimistically to local storage
   async applyOperationOptimistically(operation: Operation): Promise<void> {
-    await workerClient.applyOperationOptimistically(operation);
+    await offlineWorkerService.applyOperationOptimistically(operation);
   }
 
   // Reconcile with server state after sync
   async reconcileWithServerState(namespace: string, serverItems: LocalBookmarkItem[]): Promise<void> {
-    await workerClient.reconcileWithServer(namespace, serverItems);
+    await offlineWorkerService.reconcileWithServer(namespace, serverItems);
   }
 
   // Get item by ID (useful for immediate reference after creation)
   async getById(namespace: string, id: string | number): Promise<LocalBookmarkItem | null> {
-    return await workerClient.getById(namespace, id);
+    const item = await offlineWorkerService.getItemById(namespace, id);
+    return item as LocalBookmarkItem | null;
   }
 
   // Fetch initial server data for fresh sessions
   async fetchInitialData(namespace: string): Promise<void> {
-    await workerClient.fetchInitialData(namespace);
+    await offlineWorkerService.fetchInitialData(namespace);
   }
 
   // Build hierarchical structure from flat array

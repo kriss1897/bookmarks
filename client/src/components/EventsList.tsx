@@ -1,11 +1,13 @@
-import { useSSE } from '../hooks/useSSE'
+import { useNamespace } from '../hooks/useNamespace'
+import { useEventLog } from '../hooks/useEventLog'
 
 interface EventsListProps {
   variant?: 'default' | 'sidebar'
 }
 
 export function EventsList({ variant = 'default' }: EventsListProps) {
-	const { sseMessages, namespace } = useSSE()
+	const { namespace } = useNamespace()
+	const { events } = useEventLog()
 
 	function getMessageStyle(type: string) {
 		switch (type) {
@@ -23,27 +25,27 @@ export function EventsList({ variant = 'default' }: EventsListProps) {
 	}
 
 	// Sort by timestamp descending so latest is on top
-	const messagesDesc = [...sseMessages].sort((a, b) => {
+	const messagesDesc = [...events].sort((a, b) => {
 		const ta = new Date(a.timestamp).getTime()
 		const tb = new Date(b.timestamp).getTime()
 		return tb - ta
 	})
 
   const containerClasses = variant === 'sidebar'
-    ? 'w-full rounded-lg border bg-white p-3 shadow-sm dark:bg-neutral-900'
+    ? 'w-full flex flex-col p-3 rounded-lg border bg-white shadow-sm dark:bg-neutral-900 dark:border-neutral-800'
     : 'w-full max-w-2xl rounded-lg border bg-white p-4 shadow-sm dark:bg-neutral-900'
 
   const scrollAreaClasses = variant === 'sidebar'
-    ? 'h-[calc(100vh-200px)] overflow-y-auto rounded-md border bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-950'
-    : 'max-h-60 overflow-y-auto rounded-md border bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-950'
+    ? 'flex-1 overflow-y-auto min-h-0 overflow-x-hidden'
+    : 'max-h-60 overflow-y-auto'
 
 	return (
 		<div className={containerClasses}>
 			<h3 className="text-sm font-semibold mb-2 text-neutral-800 dark:text-neutral-200">
-				Live Events for "{namespace}" ({sseMessages.length}):
+				Live Events for "{namespace}" ({events.length}):
 			</h3>
 			<div className={scrollAreaClasses}>
-				{sseMessages.length > 0 ? (
+				{events.length > 0 ? (
 					<div className="space-y-2">
 						{messagesDesc.map((msg, index) => (
 							<div key={msg.id || index} className={`p-2 rounded text-xs border-l-4 ${getMessageStyle(msg.type)}`}>
@@ -57,9 +59,6 @@ export function EventsList({ variant = 'default' }: EventsListProps) {
 									<span className="text-neutral-500 text-[11px]">
 										{new Date(msg.timestamp).toLocaleTimeString()}
 									</span>
-								</div>
-								<div className="text-neutral-700 mb-1 dark:text-neutral-300">
-									{msg.message}
 								</div>
 								{msg.data && (
 									<pre className="mt-1 overflow-x-auto rounded bg-white p-2 font-mono text-[10px] text-neutral-700 shadow-inner dark:bg-neutral-900 dark:text-neutral-300">

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSSE } from '../hooks/useSSE';
+import { useWorkerConnection } from '../hooks/useWorkerConnection';
 import { offlineWorkerService } from '../services/offlineWorkerService';
 
 interface OfflineIndicatorProps {
@@ -8,7 +8,7 @@ interface OfflineIndicatorProps {
 }
 
 export function OfflineIndicator({ namespace, className = '' }: OfflineIndicatorProps) {
-  const { connectionStatus } = useSSE();
+  const { connectionStatus } = useWorkerConnection();
   const [pendingOpsCount, setPendingOpsCount] = React.useState(0);
   const [isSyncing, setIsSyncing] = React.useState(false);
 
@@ -16,27 +16,29 @@ export function OfflineIndicator({ namespace, className = '' }: OfflineIndicator
 
   // Listen for pending operations count updates
   React.useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      const message = event.data;
-      
-      if (message.type === 'PENDING_OPERATIONS_COUNT') {
-        if (message.namespace === namespace) {
-          setPendingOpsCount(message.count);
-        }
-      } else if (message.type === 'SYNC_STATUS') {
-        if (message.namespace === namespace) {
-          setIsSyncing(message.syncing);
-        }
+    const handlePendingCount = (data: unknown) => {
+      const message = data as { namespace?: string; count?: number };
+      if (message.namespace === namespace && typeof message.count === 'number') {
+        setPendingOpsCount(message.count);
       }
     };
 
-    offlineWorkerService.addEventListener('message', handleMessage);
+    const handleSyncStatus = (data: unknown) => {
+      const message = data as { namespace?: string; syncing?: boolean };
+      if (message.namespace === namespace && typeof message.syncing === 'boolean') {
+        setIsSyncing(message.syncing);
+      }
+    };
+
+    offlineWorkerService.addEventListener('pendingCount', handlePendingCount);
+    offlineWorkerService.addEventListener('syncStatus', handleSyncStatus);
     
     // Get initial count
     offlineWorkerService.getPendingOperationsCount(namespace);
 
     return () => {
-      offlineWorkerService.removeEventListener('message', handleMessage);
+      offlineWorkerService.removeEventListener('pendingCount', handlePendingCount);
+      offlineWorkerService.removeEventListener('syncStatus', handleSyncStatus);
     };
   }, [namespace]);
 

@@ -11,4 +11,19 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  worker: {
+    format: 'es',
+    plugins: () => [
+      // Include the same plugins for workers if needed
+    ],
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/worker-[name]-[hash].js',
+      }
+    }
+  },
+  // Ensure TypeScript compiles workers
+  optimizeDeps: {
+    exclude: ['comlink']
+  }
 })
