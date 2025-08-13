@@ -13,7 +13,7 @@ interface SSEMessage {
 
 interface SSEContextType {
   sseMessages: SSEMessage[];
-  connectionStatus: 'disconnected' | 'connecting' | 'connected';
+  connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
   connectionCount: number;
   isLoading: boolean;
   namespace: string;
@@ -22,6 +22,12 @@ interface SSEContextType {
   sendNotification: (type: 'info' | 'success' | 'warning' | 'error') => Promise<void>;
   clearMessages: () => void;
   fetchConnectionCount: () => Promise<void>;
+  reconnectInfo?: {
+    attempt: number;
+    delayMs: number;
+    nextRetryAt: string;
+  };
+  countdownSeconds: number;
 }
 
 const SSEContext = createContext<SSEContextType | undefined>(undefined);
@@ -40,9 +46,15 @@ export function SSEProvider({ children }: SSEProviderProps) {
   const [sseMessages, setSseMessages] = useState<SSEMessage[]>([]);
   
   // Regular state for transient data
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'reconnecting'>('disconnected');
   const [connectionCount, setConnectionCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [reconnectInfo, setReconnectInfo] = useState<{
+    attempt: number;
+    delayMs: number;
+    nextRetryAt: string;
+  } | undefined>(undefined);
+  const [countdownSeconds, setCountdownSeconds] = useState<number>(0);
 
   // Load persisted messages on mount
   useEffect(() => {
@@ -81,6 +93,8 @@ export function SSEProvider({ children }: SSEProviderProps) {
   // Shared Worker management
   const sharedWorkerRef = useRef<SharedWorker | null>(null);
   const portRef = useRef<MessagePort | null>(null);
+  const connectedNamespaceRef = useRef<string | null>(null);
+  const connectionStatusRef = useRef<'disconnected' | 'connecting' | 'connected' | 'reconnecting'>('disconnected');
 
   // API functions for triggering events
   const fetchConnectionCount = useCallback(async () => {
@@ -95,13 +109,33 @@ export function SSEProvider({ children }: SSEProviderProps) {
     switch (message.type) {
       case 'connected':
         setConnectionStatus('connected');
+        connectionStatusRef.current = 'connected';
+        setReconnectInfo(undefined);
+        setCountdownSeconds(0);
         console.log(`Connected to namespace: ${message.namespace}`);
         break;
         
       case 'disconnected':
-        setConnectionStatus('disconnected');
+        // Only change to disconnected if we're not already reconnecting
+        if (connectionStatusRef.current !== 'reconnecting') {
+          setConnectionStatus('disconnected');
+          connectionStatusRef.current = 'disconnected';
+          setReconnectInfo(undefined);
+          setCountdownSeconds(0);
+        }
         console.log(`Disconnected from namespace: ${message.namespace}`);
         break;
+        
+      case 'reconnecting': {
+        setConnectionStatus('reconnecting');
+        connectionStatusRef.current = 'reconnecting';
+        const data = message.data as { attempt: number; delayMs: number; nextRetryAt: string };
+        setReconnectInfo(data);
+        // Initialize countdown
+        setCountdownSeconds(Math.ceil(data.delayMs / 1000));
+        console.log(`Reconnecting to namespace: ${message.namespace} (attempt ${data.attempt})`);
+        break;
+      }
         
       case 'error':
         console.error('Worker error:', message.data);
@@ -130,26 +164,40 @@ export function SSEProvider({ children }: SSEProviderProps) {
       default:
         console.warn('Unknown worker message type:', message.type);
     }
-  }, [setSseMessages]);
+  }, [setSseMessages]); // Stable dependency
 
-  // Initialize shared worker and handle namespace changes
+  // Create a stable reference to handleWorkerMessage
+  const handleWorkerMessageRef = useRef(handleWorkerMessage);
+  handleWorkerMessageRef.current = handleWorkerMessage;
+
+  // Countdown timer for reconnection
   useEffect(() => {
-    if (!namespace.trim()) {
-      // Cleanup if no namespace
-      if (portRef.current && sharedWorkerRef.current) {
-        portRef.current.postMessage({
-          type: 'disconnect',
-          namespace: namespace
+    let interval: NodeJS.Timeout;
+    
+    if (connectionStatus === 'reconnecting' && countdownSeconds > 0) {
+      interval = setInterval(() => {
+        setCountdownSeconds(prev => {
+          if (prev <= 1) {
+            // When countdown reaches 0, we should be attempting to reconnect
+            return 0;
+          }
+          return prev - 1;
         });
-      }
-      setConnectionStatus('disconnected');
-      return;
+      }, 1000);
     }
+    
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [connectionStatus, countdownSeconds]);
 
-    // Initialize shared worker if not already done
+  // Initialize shared worker once
+  useEffect(() => {
     if (!sharedWorkerRef.current) {
       try {
-        console.log('Initializing Shared Worker...');
+        console.log('SSEContext: Initializing Shared Worker...');
         const worker = new SharedWorker('/sse-shared-worker.js');
         sharedWorkerRef.current = worker;
         
@@ -158,7 +206,7 @@ export function SSEProvider({ children }: SSEProviderProps) {
         
         // Set up message handling
         port.onmessage = (event) => {
-          handleWorkerMessage(event.data);
+          handleWorkerMessageRef.current(event.data);
         };
         
         port.onmessageerror = (error) => {
@@ -167,36 +215,85 @@ export function SSEProvider({ children }: SSEProviderProps) {
         };
         
         port.start();
-        console.log('Shared Worker initialized');
+        console.log('SSEContext: Shared Worker initialized');
         
       } catch (error) {
         console.error('Failed to initialize Shared Worker:', error);
         setConnectionStatus('disconnected');
-        return;
       }
     }
+  }, []); // No dependencies - runs once
 
-    // Connect to the namespace via shared worker
-    if (portRef.current) {
-      console.log(`Connecting to namespace: ${namespace}`);
-      setConnectionStatus('connecting');
-      
-      portRef.current.postMessage({
-        type: 'connect',
-        namespace: namespace
-      });
+  // Handle namespace connection with debouncing
+  useEffect(() => {
+    if (!portRef.current) {
+      console.log('SSEContext: Port not ready, skipping namespace connection');
+      return;
     }
+
+    // Debounce namespace changes to prevent rapid connect/disconnect
+    const timeoutId = setTimeout(() => {
+      const currentNamespace = connectedNamespaceRef.current;
+      
+      // Disconnect from previous namespace if different
+      if (currentNamespace && currentNamespace !== namespace && namespace.trim()) {
+        console.log(`SSEContext: Disconnecting from previous namespace: ${currentNamespace}`);
+        portRef.current!.postMessage({
+          type: 'disconnect',
+          namespace: currentNamespace
+        });
+      }
+
+      if (!namespace.trim()) {
+        // Cleanup if no namespace
+        if (currentNamespace) {
+          console.log(`SSEContext: Disconnecting from namespace: ${currentNamespace}`);
+          portRef.current!.postMessage({
+            type: 'disconnect',
+            namespace: currentNamespace
+          });
+          connectedNamespaceRef.current = null;
+        }
+        setConnectionStatus('disconnected');
+        connectionStatusRef.current = 'disconnected';
+        return;
+      }
+
+      // Connect to new namespace if different from current
+      if (currentNamespace !== namespace) {
+        console.log(`SSEContext: Connecting to namespace: ${namespace}`);
+        setConnectionStatus('connecting');
+        connectionStatusRef.current = 'connecting';
+        
+        portRef.current!.postMessage({
+          type: 'connect',
+          namespace: namespace
+        });
+        
+        connectedNamespaceRef.current = namespace;
+      }
+    }, 100); // 100ms debounce
 
     // Cleanup function
     return () => {
-      if (portRef.current) {
+      clearTimeout(timeoutId);
+    };
+  }, [namespace]); // Only depend on namespace
+
+  // Initialize shared worker and handle namespace changes
+  useEffect(() => {
+    return () => {
+      // Final cleanup on unmount
+      if (portRef.current && connectedNamespaceRef.current) {
+        console.log(`SSEContext: Final cleanup for namespace: ${connectedNamespaceRef.current}`);
         portRef.current.postMessage({
           type: 'disconnect',
-          namespace: namespace
+          namespace: connectedNamespaceRef.current
         });
+        connectedNamespaceRef.current = null;
       }
     };
-  }, [namespace, handleWorkerMessage]);
+  }, []); // Only run on mount/unmount
 
   // API functions for triggering events via shared worker
   const triggerCustomEvent = async () => {
@@ -277,6 +374,7 @@ export function SSEProvider({ children }: SSEProviderProps) {
   useEffect(() => {
     return () => {
       if (portRef.current && namespace) {
+        console.log(`SSEContext: Final cleanup for namespace: ${namespace}`);
         portRef.current.postMessage({
           type: 'disconnect',
           namespace: namespace
@@ -296,6 +394,8 @@ export function SSEProvider({ children }: SSEProviderProps) {
     sendNotification,
     clearMessages,
     fetchConnectionCount,
+    reconnectInfo,
+    countdownSeconds,
   };
 
   return (

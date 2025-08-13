@@ -52,7 +52,7 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState<'folder' | 'bookmark' | null>(null);
-  const { connectionStatus, sseMessages } = useSSE();
+  const { connectionStatus, sseMessages, reconnectInfo, countdownSeconds } = useSSE();
 
   // Form states
   const [folderName, setFolderName] = useState('');
@@ -300,8 +300,23 @@ export function BookmarkManager({ namespace }: BookmarkManagerProps) {
         )}
 
         {connectionStatus !== 'connected' && (
-          <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-4">
-            Connection status: {connectionStatus}
+          <div className={`px-4 py-3 rounded mb-4 ${
+            connectionStatus === 'reconnecting' 
+              ? 'bg-blue-100 border border-blue-400 text-blue-700'
+              : connectionStatus === 'connecting'
+              ? 'bg-yellow-100 border border-yellow-400 text-yellow-700'
+              : 'bg-red-100 border border-red-400 text-red-700'
+          }`}>
+            {connectionStatus === 'reconnecting' && reconnectInfo ? (
+              <div>
+                <div>Reconnecting... (attempt {reconnectInfo.attempt})</div>
+                <div className="text-sm">
+                  Next retry in {countdownSeconds > 0 ? `${countdownSeconds}s` : 'now'} at {new Date(reconnectInfo.nextRetryAt).toLocaleTimeString()}
+                </div>
+              </div>
+            ) : (
+              <div>Connection status: {connectionStatus}</div>
+            )}
           </div>
         )}
       </div>
