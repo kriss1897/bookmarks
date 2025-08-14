@@ -1,8 +1,10 @@
+import { BookmarksDemo } from "@/components/demo/BookmarksDemo"
+
 function App() {
   return (
-    <>
-      <h1>Bookmarks</h1>
-    </>
+    <div className="flex min-h-svh flex-col items-center justify-start">
+      <BookmarksDemo />
+    </div>
   )
 }
 
