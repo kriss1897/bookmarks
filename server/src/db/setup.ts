@@ -78,12 +78,24 @@ async function createDatabase(dbPath: string): Promise<void> {
       FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS operation_log (
+      id TEXT PRIMARY KEY,
+      operation_type TEXT NOT NULL,
+      namespace TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      processed INTEGER NOT NULL DEFAULT 0 CHECK (processed IN (0, 1)),
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
     -- Performance indexes
-  CREATE INDEX IF NOT EXISTS idx_nodes_namespace_parent ON nodes(namespace, parent_id);
-  CREATE INDEX IF NOT EXISTS idx_nodes_namespace_parent_order ON nodes(namespace, parent_id, order_index);
+    CREATE INDEX IF NOT EXISTS idx_nodes_namespace_parent ON nodes(namespace, parent_id);
+    CREATE INDEX IF NOT EXISTS idx_nodes_namespace_parent_order ON nodes(namespace, parent_id, order_index);
     CREATE INDEX IF NOT EXISTS idx_bookmarks_url ON bookmarks(url);
     CREATE INDEX IF NOT EXISTS idx_nodes_namespace ON nodes(namespace);
     CREATE INDEX IF NOT EXISTS idx_folder_state_namespace ON folder_state(namespace);
+    CREATE INDEX IF NOT EXISTS idx_operation_log_namespace ON operation_log(namespace);
+    CREATE INDEX IF NOT EXISTS idx_operation_log_client_id ON operation_log(client_id);
 
     -- Schema version tracking
     CREATE TABLE IF NOT EXISTS schema_info (

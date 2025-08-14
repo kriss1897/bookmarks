@@ -1,81 +1,123 @@
+// Operation types for the bookmark application (matches server)
+export type OperationType = 
+  | 'createBookmark' 
+  | 'createFolder' 
+  | 'updateBookmark' 
+  | 'updateFolder' 
+  | 'deleteBookmark' 
+  | 'deleteFolder' 
+  | 'moveBookmark' 
+  | 'moveFolder';
+
+// Base operation interface (matches server)
 export interface Operation {
-  id: string; // UUID
-  clientId: string;
-  namespace: string;
+  id: string;
   type: OperationType;
+  namespace: string;
   payload: OperationPayload;
-  clientCreatedAt: number; // ms timestamp
-  status: OperationStatus;
-  retryCount?: number;
+  clientId: string;
+  timestamp: number;
 }
 
-export const OperationType = {
-  CREATE_BOOKMARK: 'CREATE_BOOKMARK',
-  UPDATE_BOOKMARK: 'UPDATE_BOOKMARK', 
-  DELETE_ITEM: 'DELETE_ITEM',
-  CREATE_FOLDER: 'CREATE_FOLDER',
-  UPDATE_FOLDER: 'UPDATE_FOLDER',
-  MOVE_ITEM: 'MOVE_ITEM'
-} as const;
-
-export type OperationType = typeof OperationType[keyof typeof OperationType];
-
-export const OperationStatus = {
-  PENDING: 'pending',
-  SYNCED: 'synced', 
-  FAILED: 'failed'
-} as const;
-
-export type OperationStatus = typeof OperationStatus[keyof typeof OperationStatus];
-
-// Union type for all operation payloads
+// Union type for all operation payloads (matches server)
 export type OperationPayload = 
   | CreateBookmarkPayload
-  | UpdateBookmarkPayload
-  | DeleteItemPayload
   | CreateFolderPayload
+  | UpdateBookmarkPayload
   | UpdateFolderPayload
-  | MoveItemPayload;
+  | DeleteBookmarkPayload
+  | DeleteFolderPayload
+  | MoveBookmarkPayload
+  | MoveFolderPayload;
 
-// Operation payloads for different types
+// Create bookmark operation (matches server)
 export interface CreateBookmarkPayload {
-  id: string; // temp ID initially
-  name: string;
+  id: string; // Client-generated UUID
+  name: string; // Will map to title
   url: string;
   parentId?: string;
   isFavorite?: boolean;
   orderIndex: string;
 }
 
-export interface UpdateBookmarkPayload {
-  id: string;
-  name?: string;
-  url?: string;
-  isFavorite?: boolean;
-}
-
-export interface DeleteItemPayload {
-  id: string;
-}
-
+// Create folder operation (matches server)
 export interface CreateFolderPayload {
-  id: string; // temp ID initially
+  id: string; // Client-generated UUID
   name: string;
   parentId?: string;
   orderIndex: string;
 }
 
+// Update bookmark operation (matches server)
+export interface UpdateBookmarkPayload {
+  id: string;
+  name?: string; // Will map to title
+  url?: string;
+  isFavorite?: boolean;
+}
+
+// Update folder operation (matches server)
 export interface UpdateFolderPayload {
   id: string;
   name?: string;
   isOpen?: boolean;
 }
 
-export interface MoveItemPayload {
+// Delete bookmark operation (matches server)
+export interface DeleteBookmarkPayload {
+  id: string;
+}
+
+// Delete folder operation (matches server)
+export interface DeleteFolderPayload {
+  id: string;
+}
+
+// Move bookmark operation (matches server)
+export interface MoveBookmarkPayload {
   id: string;
   newParentId?: string;
-  targetOrderIndex: string; // New order index computed on client
+  targetOrderIndex: string;
 }
+
+// Move folder operation (matches server)
+export interface MoveFolderPayload {
+  id: string;
+  newParentId?: string;
+  targetOrderIndex: string;
+}
+
+// Sync response from server (matches server)
+export interface SyncResponse {
+  applied: {
+    operationId: string;
+    status: 'success' | 'failed';
+    serverId?: string;
+    tempId?: string;
+    error?: string;
+    data?: unknown; // Server response data (e.g., created item)
+    duplicate?: boolean; // Whether operation was already processed
+  }[];
+  updatedItems: Record<string, unknown>[];
+  mappings: Record<string, string>;
+  serverTimestamp: number;
+}
+
+// Client-specific extensions for operation queue
+export interface QueuedOperation extends Operation {
+  status: OperationStatus;
+  retryCount?: number;
+  queuedAt: number; // When operation was queued locally
+}
+
+export const OperationStatus = {
+  PENDING: 'pending',
+  SYNCING: 'syncing',
+  SYNCED: 'synced', 
+  FAILED: 'failed'
+} as const;
+
+export type OperationStatus = typeof OperationStatus[keyof typeof OperationStatus];
 
 // Worker message types
 export interface WorkerMessage {
@@ -88,7 +130,7 @@ export interface EnqueueOperationMessage extends WorkerMessage {
   type: 'enqueueOperation';
   data: {
     namespace: string;
-    operation: Operation;
+    operation: Omit<Operation, 'clientId'>; // clientId added by worker
   };
 }
 
@@ -118,6 +160,7 @@ export interface DataChangedMessage extends WorkerMessage {
   type: 'dataChanged';
   data: {
     namespace: string;
+    type?: 'serverUpdate' | 'localUpdate';
   };
 }
 
@@ -144,25 +187,6 @@ export interface ErrorMessage extends WorkerMessage {
     reason: string;
     operationId?: string;
   };
-}
-
-// Sync API types
-export interface SyncRequest {
-  clientId: string;
-  operations: Operation[];
-}
-
-export interface SyncResponse {
-  applied: AppliedOperation[];
-  updatedItems?: Record<string, unknown>[];
-  serverTime: number;
-}
-
-export interface AppliedOperation {
-  operationId: string;
-  status: 'success' | 'rejected';
-  reason?: string;
-  mappedIds?: Record<string, number>; // tempId -> realId
 }
 
 // Utility functions

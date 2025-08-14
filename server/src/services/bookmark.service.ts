@@ -388,4 +388,92 @@ export class BookmarkService {
     await db.update(nodes).set(nodeUpdates).where(eq(nodes.id, itemId));
   }
   // No linked-list helpers needed with orderIndex
+
+  // Public update methods for operation-based architecture
+  async updateBookmark(bookmarkId: string, updates: { title?: string; url?: string; favorite?: boolean }): Promise<BookmarkItem> {
+    // First get the current bookmark to return updated version
+    const bookmark = await this.getItemById(bookmarkId);
+    if (!bookmark || bookmark.type !== 'bookmark') {
+      throw new Error('Bookmark not found');
+    }
+
+    // Update using the private updateItem method
+    await this.updateItem(bookmark.namespace, bookmarkId, updates);
+
+    // Return the updated bookmark
+    return this.getItemById(bookmarkId) as Promise<BookmarkItem>;
+  }
+
+  async updateFolder(folderId: string, updates: { name?: string; open?: boolean }): Promise<BookmarkItem> {
+    // First get the current folder to return updated version
+    const folder = await this.getItemById(folderId);
+    if (!folder || folder.type !== 'folder') {
+      throw new Error('Folder not found');
+    }
+
+    // Update using the private updateItem method
+    await this.updateItem(folder.namespace, folderId, updates);
+
+    // Return the updated folder
+    return this.getItemById(folderId) as Promise<BookmarkItem>;
+  }
+
+  private async getItemById(itemId: string): Promise<BookmarkItem | null> {
+    const nodeResult = await db
+      .select()
+      .from(nodes)
+      .where(eq(nodes.id, itemId))
+      .get();
+
+    if (!nodeResult) return null;
+
+    if (nodeResult.type === 'folder') {
+      const folderResult = await db
+        .select()
+        .from(folders)
+        .where(eq(folders.nodeId, itemId))
+        .get();
+
+      const stateResult = await db
+        .select()
+        .from(folderState)
+        .where(and(
+          eq(folderState.namespace, nodeResult.namespace),
+          eq(folderState.nodeId, itemId)
+        ))
+        .get();
+
+      return {
+        id: nodeResult.id,
+        type: 'folder',
+        namespace: nodeResult.namespace,
+        parentId: nodeResult.parentId,
+        orderIndex: nodeResult.orderIndex,
+        createdAt: nodeResult.createdAt * 1000,
+        updatedAt: nodeResult.updatedAt * 1000,
+        name: folderResult?.name,
+        open: stateResult?.open ?? false,
+      };
+    } else {
+      const bookmarkResult = await db
+        .select()
+        .from(bookmarks)
+        .where(eq(bookmarks.nodeId, itemId))
+        .get();
+
+      return {
+        id: nodeResult.id,
+        type: 'bookmark',
+        namespace: nodeResult.namespace,
+        parentId: nodeResult.parentId,
+        orderIndex: nodeResult.orderIndex,
+        createdAt: nodeResult.createdAt * 1000,
+        updatedAt: nodeResult.updatedAt * 1000,
+        title: bookmarkResult?.title,
+        url: bookmarkResult?.url,
+        icon: bookmarkResult?.icon || undefined,
+        favorite: bookmarkResult?.favorite ?? false,
+      };
+    }
+  }
 }

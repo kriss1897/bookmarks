@@ -269,20 +269,57 @@ export class BookmarkController {
   updateBookmark = async (req: Request, res: Response): Promise<void> => {
     try {
       const { namespace, bookmarkId } = req.params;
-      const { title, url, icon } = req.body;
+      const { title, url, favorite } = req.body;
 
-      // For now, we'll implement a simple update
-      // In a real implementation, you'd add this method to BookmarkService
+      // Validate input
+      if (title !== undefined && (typeof title !== "string" || title.trim() === "")) {
+        res.status(400).json({
+          success: false,
+          error: "Title must be a non-empty string if provided",
+        });
+        return;
+      }
 
-      res.status(501).json({
-        success: false,
-        error: "Update bookmark not yet implemented",
+      if (url !== undefined && (typeof url !== "string" || url.trim() === "")) {
+        res.status(400).json({
+          success: false,
+          error: "URL must be a non-empty string if provided",
+        });
+        return;
+      }
+
+      if (favorite !== undefined && typeof favorite !== "boolean") {
+        res.status(400).json({
+          success: false,
+          error: "Favorite must be a boolean if provided",
+        });
+        return;
+      }
+
+      const updatedBookmark = await this.bookmarkService.updateBookmark(bookmarkId, {
+        title,
+        url,
+        favorite,
       });
+
+      // Broadcast the change to all connected clients
+      this.eventPublisher.publishToNamespace(namespace, {
+        type: "bookmark_updated",
+        id: bookmarkId,
+        title: updatedBookmark.title,
+        url: updatedBookmark.url,
+        favorite: updatedBookmark.favorite,
+        updatedAt: updatedBookmark.updatedAt,
+        timestamp: new Date().toISOString(),
+      });
+
+      res.json({ success: true, data: updatedBookmark });
     } catch (error) {
       console.error("Error updating bookmark:", error);
       res.status(500).json({
         success: false,
         error: "Failed to update bookmark",
+        details: error instanceof Error ? error.message : String(error),
       });
     }
   };
@@ -291,20 +328,47 @@ export class BookmarkController {
   updateFolder = async (req: Request, res: Response): Promise<void> => {
     try {
       const { namespace, folderId } = req.params;
-      const { name } = req.body;
+      const { name, open } = req.body;
 
-      // For now, we'll implement a simple update
-      // In a real implementation, you'd add this method to BookmarkService
+      // Validate input
+      if (name !== undefined && (typeof name !== "string" || name.trim() === "")) {
+        res.status(400).json({
+          success: false,
+          error: "Name must be a non-empty string if provided",
+        });
+        return;
+      }
 
-      res.status(501).json({
-        success: false,
-        error: "Update folder not yet implemented",
+      if (open !== undefined && typeof open !== "boolean") {
+        res.status(400).json({
+          success: false,
+          error: "Open must be a boolean if provided",
+        });
+        return;
+      }
+
+      const updatedFolder = await this.bookmarkService.updateFolder(folderId, {
+        name,
+        open,
       });
+
+      // Broadcast the change to all connected clients
+      this.eventPublisher.publishToNamespace(namespace, {
+        type: "folder_updated",
+        id: folderId,
+        name: updatedFolder.name,
+        open: updatedFolder.open,
+        updatedAt: updatedFolder.updatedAt,
+        timestamp: new Date().toISOString(),
+      });
+
+      res.json({ success: true, data: updatedFolder });
     } catch (error) {
       console.error("Error updating folder:", error);
       res.status(500).json({
         success: false,
         error: "Failed to update folder",
+        details: error instanceof Error ? error.message : String(error),
       });
     }
   };

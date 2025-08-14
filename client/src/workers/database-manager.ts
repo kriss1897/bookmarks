@@ -1,4 +1,4 @@
-import type { Operation } from '../types/operations';
+import type { QueuedOperation } from '../types/operations';
 import type { StoredBookmark, StoredFolder, ServerItem } from './worker-types';
 import { DATABASE_CONFIG } from './worker-config';
 
@@ -95,7 +95,7 @@ export class DatabaseManager {
         const operationsStore = db.createObjectStore('operations', { keyPath: 'id' });
         operationsStore.createIndex('namespace', 'namespace');
         operationsStore.createIndex('status', 'status');
-        operationsStore.createIndex('clientCreatedAt', 'clientCreatedAt');
+        operationsStore.createIndex('timestamp', 'timestamp');
         
         db.createObjectStore('syncMeta', { keyPath: 'namespace' });
         
@@ -228,7 +228,7 @@ export class DatabaseManager {
     }
   }
 
-  async enqueueOperationInDB(operation: Operation): Promise<void> {
+  async enqueueOperationInDB(operation: QueuedOperation): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
     
     const transaction = this.db.transaction(['operations'], 'readwrite');
@@ -240,9 +240,10 @@ export class DatabaseManager {
       namespace: operation.namespace,
       type: operation.type,
       payload: JSON.stringify(operation.payload),
-      clientCreatedAt: operation.clientCreatedAt,
+      timestamp: operation.timestamp, // Use timestamp instead of clientCreatedAt
       status: operation.status,
       retryCount: operation.retryCount || 0,
+      queuedAt: operation.queuedAt,
       createdAt: Date.now()
     };
     
@@ -280,7 +281,7 @@ export class DatabaseManager {
     });
   }
 
-  async getPendingOperations(namespace: string): Promise<Operation[]> {
+  async getPendingOperations(namespace: string): Promise<QueuedOperation[]> {
     if (!this.db) return [];
     
     const transaction = this.db.transaction(['operations'], 'readonly');
@@ -288,7 +289,7 @@ export class DatabaseManager {
     const index = store.index('namespace');
     
     return new Promise((resolve, reject) => {
-      const operations: Operation[] = [];
+      const operations: QueuedOperation[] = [];
       const request = index.openCursor(IDBKeyRange.only(namespace));
       
       request.onsuccess = (event) => {
@@ -302,14 +303,15 @@ export class DatabaseManager {
               namespace: op.namespace,
               type: op.type,
               payload: JSON.parse(op.payload),
-              clientCreatedAt: op.clientCreatedAt,
+              timestamp: op.timestamp,
               status: op.status,
-              retryCount: op.retryCount
+              retryCount: op.retryCount,
+              queuedAt: op.queuedAt
             });
           }
           cursor.continue();
         } else {
-          operations.sort((a, b) => a.clientCreatedAt - b.clientCreatedAt);
+          operations.sort((a, b) => a.timestamp - b.timestamp);
           resolve(operations);
         }
       };

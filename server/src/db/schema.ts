@@ -3,6 +3,7 @@ import { nodes, type Node, type NewNode } from '../models/nodes.js';
 import { folders, type Folder, type NewFolder } from '../models/folders.js';
 import { bookmarks, type Bookmark, type NewBookmark } from '../models/bookmarks.js';
 import { folderState, type FolderState, type NewFolderState } from '../models/folderState.js';
+import { operationLog, type OperationLog, type NewOperationLog } from '../models/operationLog.js';
 
 // Relations
 export const nodesRelations = relations(nodes, ({ one, many }) => ({
@@ -50,5 +51,5 @@ export const folderStateRelations = relations(folderState, ({ one }) => ({
 }));
 
 // Type exports
-export type { Node, NewNode, Folder, NewFolder, Bookmark, NewBookmark, FolderState, NewFolderState };
-export { nodes, folders, bookmarks, folderState };
+export type { Node, NewNode, Folder, NewFolder, Bookmark, NewBookmark, FolderState, NewFolderState, OperationLog, NewOperationLog };
+export { nodes, folders, bookmarks, folderState, operationLog };

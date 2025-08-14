@@ -4,6 +4,7 @@ import { EventPublisher } from './services/EventPublisher.js';
 import { EventsController } from './controllers/events.controller.js';
 import { BookmarkController } from './controllers/bookmark.controller.js';
 import { SyncController } from './controllers/sync.controller.js';
+import { OperationsController } from './controllers/operations.controller.js';
 import { initializeDatabase, closeDatabase } from './db/connection.js';
 
 // Initialize database
@@ -17,6 +18,7 @@ const eventPublisher = new EventPublisher(eventsManager);
 const eventsController = new EventsController(eventsManager);
 const bookmarkController = new BookmarkController(eventPublisher);
 const syncController = new SyncController(eventPublisher);
+const operationsController = new OperationsController(eventPublisher);
 
 const app = express();
 
@@ -35,10 +37,20 @@ app.delete('/api/bookmarks/:namespace/items/:itemId', bookmarkController.deleteI
 app.put('/api/bookmarks/:namespace/bookmarks/:bookmarkId', bookmarkController.updateBookmark);
 app.put('/api/bookmarks/:namespace/folders/:folderId', bookmarkController.updateFolder);
 
+// Operations API Routes (operation-based endpoints for client sync)
+app.post('/api/operations/:namespace/create-bookmark', operationsController.createBookmark);
+app.post('/api/operations/:namespace/create-folder', operationsController.createFolder);
+app.put('/api/operations/:namespace/update-bookmark', operationsController.updateBookmark);
+app.put('/api/operations/:namespace/update-folder', operationsController.updateFolder);
+app.delete('/api/operations/:namespace/delete-bookmark', operationsController.deleteBookmark);
+app.delete('/api/operations/:namespace/delete-folder', operationsController.deleteFolder);
+app.post('/api/operations/:namespace/move-bookmark', operationsController.moveBookmark);
+app.post('/api/operations/:namespace/move-folder', operationsController.moveFolder);
+
 // Events Route
 app.get('/api/events', eventsController.handleEventsConnection);
 
-// Sync Route (for offline-first operations)
+// Sync Route (for offline-first operations - legacy bulk endpoint)
 app.post('/api/sync/:namespace/operations', syncController.syncOperations);
 
 // Graceful shutdown

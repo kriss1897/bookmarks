@@ -1,7 +1,7 @@
 import * as Comlink from "comlink";
 import type { WorkerAPI } from "../workers/worker-types";
 import type { Operation } from "../types/operations";
-import { generateClientId, OperationType } from "../types/operations";
+import { generateClientId } from "../types/operations";
 
 function generateUUID(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -232,7 +232,7 @@ export class OfflineWorkerService {
       id: crypto.randomUUID(),
       clientId: this.clientId,
       namespace,
-      type: OperationType.CREATE_BOOKMARK,
+      type: 'createBookmark',
       payload: {
         id: generateUUID(),
         name: payload.name,
@@ -241,8 +241,7 @@ export class OfflineWorkerService {
         isFavorite: payload.isFavorite,
         orderIndex: payload.orderIndex,
       },
-      clientCreatedAt: Date.now(),
-      status: "pending",
+      timestamp: Date.now(),
     };
   }
 
@@ -258,15 +257,14 @@ export class OfflineWorkerService {
       id: crypto.randomUUID(),
       clientId: this.clientId,
       namespace,
-      type: OperationType.CREATE_FOLDER,
+      type: 'createFolder',
       payload: {
         id: generateUUID(),
         name: payload.name,
         parentId: payload.parentId,
         orderIndex: payload.orderIndex,
       },
-      clientCreatedAt: Date.now(),
-      status: "pending",
+      timestamp: Date.now(),
     };
   }
 
@@ -283,10 +281,9 @@ export class OfflineWorkerService {
       id: crypto.randomUUID(),
       clientId: this.clientId,
       namespace,
-      type: OperationType.UPDATE_BOOKMARK,
+      type: "updateBookmark",
       payload,
-      clientCreatedAt: Date.now(),
-      status: "pending",
+      timestamp: Date.now(),
     };
   }
 
@@ -302,41 +299,67 @@ export class OfflineWorkerService {
       id: crypto.randomUUID(),
       clientId: this.clientId,
       namespace,
-      type: OperationType.UPDATE_FOLDER,
+      type: "updateFolder",
       payload,
-      clientCreatedAt: Date.now(),
-      status: "pending",
+      timestamp: Date.now(),
     };
   }
 
-  deleteItemOperation(namespace: string, id: string | string): Operation {
+  deleteBookmarkOperation(namespace: string, id: string): Operation {
     return {
       id: crypto.randomUUID(),
       clientId: this.clientId,
       namespace,
-      type: OperationType.DELETE_ITEM,
+      type: "deleteBookmark",
       payload: { id },
-      clientCreatedAt: Date.now(),
-      status: "pending",
+      timestamp: Date.now(),
     };
   }
 
-  moveItemOperation(
+  deleteFolderOperation(namespace: string, id: string): Operation {
+    return {
+      id: crypto.randomUUID(),
+      clientId: this.clientId,
+      namespace,
+      type: "deleteFolder",
+      payload: { id },
+      timestamp: Date.now(),
+    };
+  }
+
+  moveBookmarkOperation(
     namespace: string,
     payload: {
       id: string;
       newParentId?: string;
-  targetOrderIndex: string;
+      targetOrderIndex: string;
     }
   ): Operation {
     return {
       id: crypto.randomUUID(),
       clientId: this.clientId,
       namespace,
-      type: OperationType.MOVE_ITEM,
+      type: "moveBookmark",
       payload,
-      clientCreatedAt: Date.now(),
-      status: "pending",
+      timestamp: Date.now(),
+    };
+  }
+
+  moveFolderOperation(
+    namespace: string,
+    payload: {
+      id: string;
+      newParentId?: string;
+      targetOrderIndex: string;
+    }
+  ): Operation {
+    return {
+      id: crypto.randomUUID(),
+      clientId: this.clientId,
+      namespace,
+      type: "moveFolder",
+      payload,
+      timestamp: Date.now(),
     };
   }
 

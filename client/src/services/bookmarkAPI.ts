@@ -192,18 +192,43 @@ export class BookmarkAPI {
 
   // Move item
   async moveItem(namespace: string, itemId: string | string, newParentId: string | undefined, targetOrderIndex: string): Promise<void> {
-    const operation = offlineWorkerService.moveItemOperation(namespace, {
+    // First, get the item to determine its type
+    const items = await localDataService.getBookmarks(namespace);
+    const item = items.find(item => item.id === itemId);
+    
+    if (!item) {
+      throw new Error(`Item with id ${itemId} not found`);
+    }
+
+    const payload = {
       id: itemId,
       newParentId,
       targetOrderIndex
-    });
+    };
+
+    // Create the appropriate operation based on item type
+    const operation = item.type === 'bookmark' 
+      ? offlineWorkerService.moveBookmarkOperation(namespace, payload)
+      : offlineWorkerService.moveFolderOperation(namespace, payload);
 
     await offlineWorkerService.enqueueOperation(namespace, operation);
   }
 
   // Delete item
   async deleteItem(namespace: string, id: string): Promise<void> {
-    const operation = offlineWorkerService.deleteItemOperation(namespace, id);
+    // First, get the item to determine its type
+    const items = await localDataService.getBookmarks(namespace);
+    const item = items.find(item => item.id === id);
+    
+    if (!item) {
+      throw new Error(`Item with id ${id} not found`);
+    }
+
+    // Create the appropriate operation based on item type
+    const operation = item.type === 'bookmark' 
+      ? offlineWorkerService.deleteBookmarkOperation(namespace, id)
+      : offlineWorkerService.deleteFolderOperation(namespace, id);
+      
     await offlineWorkerService.enqueueOperation(namespace, operation);
   }
 
@@ -260,10 +285,11 @@ export class BookmarkAPI {
     
     console.log(`Loading children for folder ${folderId} from server`);
     // Fetch from server
-    const serverItems = await this.getItemsDirect(namespace, folderId);
+    // const serverItems = await this.getItemsDirect(namespace, folderId);
     
     // Store incrementally in IndexedDB
-    await localDataService.storeFolderChildren(namespace, folderId, serverItems);
+    // TODO: Implement storeFolderChildren in localDataService for legacy support
+    // await localDataService.storeFolderChildren(namespace, folderId, serverItems);
     
     // Convert to LocalBookmarkItem format and return
     return localDataService.getFolderChildren(namespace, folderId);
@@ -287,10 +313,11 @@ export class BookmarkAPI {
     
     console.log(`Loading root items for ${namespace} from server`);
     // Fetch only root items from server
-    const serverItems = await this.getRootItems(namespace);
+    // const serverItems = await this.getRootItems(namespace);
     
     // Store in IndexedDB
-    await localDataService.storeRootItems(namespace, serverItems);
+    // TODO: Implement storeRootItems in localDataService for legacy support
+    // await localDataService.storeRootItems(namespace, serverItems);
     
     return localDataService.getRootItems(namespace);
   }

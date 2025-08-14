@@ -5,8 +5,10 @@ import type {
   CreateFolderPayload,
   UpdateBookmarkPayload,
   UpdateFolderPayload,
-  DeleteItemPayload,
-  MoveItemPayload
+  DeleteBookmarkPayload,
+  DeleteFolderPayload,
+  MoveBookmarkPayload,
+  MoveFolderPayload
 } from '../types/operations';
 
 // Database object interfaces
@@ -133,6 +135,8 @@ export type {
   CreateFolderPayload,
   UpdateBookmarkPayload,
   UpdateFolderPayload,
-  DeleteItemPayload,
-  MoveItemPayload
+  DeleteBookmarkPayload,
+  DeleteFolderPayload,
+  MoveBookmarkPayload,
+  MoveFolderPayload
 };

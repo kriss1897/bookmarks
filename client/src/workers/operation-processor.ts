@@ -4,8 +4,12 @@ import type {
   CreateFolderPayload,
   UpdateBookmarkPayload,
   UpdateFolderPayload,
-  DeleteItemPayload,
-  MoveItemPayload 
+  DeleteBookmarkPayload,
+  DeleteFolderPayload,
+  MoveBookmarkPayload,
+  MoveFolderPayload,
+  QueuedOperation,
+  OperationStatus 
 } from '../types/operations';
 import type { WorkerEventType } from './worker-types';
 import type { DatabaseManager } from './database-manager';
@@ -29,7 +33,7 @@ export class OperationProcessor {
     // Generate UUIDs for CREATE operations if they don't have IDs
     // This eliminates the need for temporary IDs and complex ID mapping during sync
     let modifiedOperation = operation;
-    if ((operation.type === 'CREATE_BOOKMARK' || operation.type === 'CREATE_FOLDER') && !operation.payload.id) {
+    if ((operation.type === 'createBookmark' || operation.type === 'createFolder') && !operation.payload.id) {
       modifiedOperation = {
         ...operation,
         payload: {
@@ -44,8 +48,16 @@ export class OperationProcessor {
       clientId: this.clientId
     };
 
+    // Create queued operation for IndexedDB storage
+    const queuedOperation: QueuedOperation = {
+      ...fullOperation,
+      status: 'pending' as OperationStatus,
+      retryCount: 0,
+      queuedAt: Date.now()
+    };
+
     try {
-      await this.databaseManager.enqueueOperationInDB(fullOperation);
+      await this.databaseManager.enqueueOperationInDB(queuedOperation);
       await this.applyOperationOptimistically(fullOperation);
       
       this.eventEmitter('dataChanged', { namespace });
@@ -72,7 +84,7 @@ export class OperationProcessor {
     
     try {
       switch (operation.type) {
-        case 'CREATE_BOOKMARK': {
+        case 'createBookmark': {
           const payload = operation.payload as CreateBookmarkPayload;
           const bookmark = {
             id: payload.id,
@@ -89,7 +101,7 @@ export class OperationProcessor {
           break;
         }
         
-        case 'CREATE_FOLDER': {
+        case 'createFolder': {
           const payload = operation.payload as CreateFolderPayload;
           const folder = {
             id: payload.id,
@@ -105,7 +117,7 @@ export class OperationProcessor {
           break;
         }
         
-        case 'UPDATE_BOOKMARK': {
+        case 'updateBookmark': {
           const payload = operation.payload as UpdateBookmarkPayload;
           const existing = await this.databaseManager.getFromStore(bookmarksStore, payload.id);
           if (existing) {
@@ -121,7 +133,7 @@ export class OperationProcessor {
           break;
         }
         
-        case 'UPDATE_FOLDER': {
+        case 'updateFolder': {
           const payload = operation.payload as UpdateFolderPayload;
           const existing = await this.databaseManager.getFromStore(foldersStore, payload.id);
           if (existing) {
@@ -136,8 +148,9 @@ export class OperationProcessor {
           break;
         }
         
-        case 'DELETE_ITEM': {
-          const payload = operation.payload as DeleteItemPayload;
+        case 'deleteBookmark':
+        case 'deleteFolder': {
+          const payload = operation.payload as DeleteBookmarkPayload | DeleteFolderPayload;
           
           // First check if it's a folder, and if so, recursively delete all children
           const folderToDelete = await this.databaseManager.getFromStore(foldersStore, payload.id);
@@ -154,8 +167,9 @@ export class OperationProcessor {
           break;
         }
         
-        case 'MOVE_ITEM': {
-          const payload = operation.payload as MoveItemPayload;
+        case 'moveBookmark':
+        case 'moveFolder': {
+          const payload = operation.payload as MoveBookmarkPayload | MoveFolderPayload;
           const [bookmark, folder] = await Promise.all([
             this.databaseManager.getFromStore(bookmarksStore, payload.id),
             this.databaseManager.getFromStore(foldersStore, payload.id)
@@ -165,7 +179,7 @@ export class OperationProcessor {
             await this.databaseManager.putInStore(bookmarksStore, {
               ...bookmark,
               parentId: payload.newParentId,
-              orderIndex: (payload as MoveItemPayload).targetOrderIndex,
+              orderIndex: (payload as MoveBookmarkPayload | MoveFolderPayload).targetOrderIndex,
               updatedAt: now
             });
           }
@@ -174,7 +188,7 @@ export class OperationProcessor {
             await this.databaseManager.putInStore(foldersStore, {
               ...folder,
               parentId: payload.newParentId,
-              orderIndex: (payload as MoveItemPayload).targetOrderIndex,
+              orderIndex: (payload as MoveBookmarkPayload | MoveFolderPayload).targetOrderIndex,
               updatedAt: now
             });
           }
