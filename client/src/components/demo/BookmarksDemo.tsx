@@ -1,6 +1,7 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
-import { BookmarkTree, isFolder, type TreeNode } from "@/lib/bookmarksTree";
+import { isFolder, type TreeNode } from "@/lib/bookmarksTree";
+import { TreeOpsBuilder, type OperationEnvelope } from "@/lib/treeOps";
 import {
   DndContext,
   DragOverlay,
@@ -18,7 +19,8 @@ import { createContext, useContext } from "react";
 
 // Lightweight, accessible demo of BookmarkTree operations
 export const BookmarksDemo: React.FC = () => {
-  const [tree, setTree] = React.useState(() => new BookmarkTree());
+  const [builder, setBuilder] = React.useState(() => new TreeOpsBuilder());
+  const tree = builder.tree;
   const [, force] = React.useReducer((c: number) => c + 1, 0);
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [hoveredFolderId, setHoveredFolderId] = React.useState<string | null>(null);
@@ -27,56 +29,41 @@ export const BookmarksDemo: React.FC = () => {
     useSensor(KeyboardSensor)
   );
 
-  // Build some initial data
-  React.useEffect(() => {
-    const t = new BookmarkTree();
-    const fWork = t.createFolder({ title: "Work" });
-    const fPlay = t.createFolder({ title: "Play" });
-    t.createBookmark({ parentId: fWork, title: "Docs", url: "https://example.com/docs" });
-    t.createBookmark({ parentId: fWork, title: "Roadmap", url: "https://example.com/roadmap" });
-    t.createBookmark({ parentId: fPlay, title: "Games", url: "https://example.com/games" });
-    setTree(t);
-  }, []);
+  // Start from empty (root only). No initial seeding.
 
   const handleAddFolder = (parentId: string) => {
-    tree.createFolder({ parentId, title: `New Folder` });
-    setTree(tree);
+    builder.createFolder({ parentId, title: `New Folder` });
     force();
   };
 
   const handleAddBookmark = (parentId: string) => {
     const n = Math.floor(Math.random() * 1000);
-    tree.createBookmark({ parentId, title: `Link ${n}`, url: `https://example.com/${n}` });
-    setTree(tree);
+    builder.createBookmark({ parentId, title: `Link ${n}`, url: `https://example.com/${n}` });
     force();
   };
 
   const handleToggle = (folderId: string) => {
-    tree.toggleFolder(folderId);
-    setTree(tree);
+    builder.toggleFolder({ folderId });
     force();
   };
 
   const handleRemove = (id: string) => {
     if (window.confirm("Remove item?")) {
-      tree.remove(id);
-      setTree(tree);
+      builder.removeNode({ nodeId: id });
       force();
     }
   };
 
   const handleMoveUp = (parentId: string, index: number) => {
     if (index <= 0) return;
-    tree.reorder({ folderId: parentId, fromIndex: index, toIndex: index - 1 });
-    setTree(tree);
+    builder.reorder({ folderId: parentId, fromIndex: index, toIndex: index - 1 });
     force();
   };
 
   const handleMoveDown = (parentId: string, index: number) => {
     const folder = tree.requireFolder(parentId);
     if (index >= folder.children.length - 1) return;
-    tree.reorder({ folderId: parentId, fromIndex: index, toIndex: index + 1 });
-    setTree(tree);
+    builder.reorder({ folderId: parentId, fromIndex: index, toIndex: index + 1 });
     force();
   };
 
@@ -126,8 +113,7 @@ export const BookmarksDemo: React.FC = () => {
 
     // Special case: root drop zone
     if (over === ROOT_DROPZONE_ID) {
-      tree.move({ nodeId: active, toFolderId: tree.rootId, index: 0 });
-      setTree(tree);
+      builder.moveNode({ nodeId: active, toFolderId: tree.rootId, index: 0 });
       setActiveId(null);
       setHoveredFolderId(null);
       force();
@@ -137,8 +123,7 @@ export const BookmarksDemo: React.FC = () => {
     // Special case: empty folder drop zone
     if (over.startsWith(FOLDER_DROPZONE_PREFIX)) {
       const folderId = over.slice(FOLDER_DROPZONE_PREFIX.length);
-      tree.move({ nodeId: active, toFolderId: folderId, index: 0 });
-      setTree(tree);
+      builder.moveItemToFolder({ nodeId: active, toFolderId: folderId, index: 0 });
       setActiveId(null);
       setHoveredFolderId(null);
       force();
@@ -168,8 +153,7 @@ export const BookmarksDemo: React.FC = () => {
     }
 
     // Move using tree logic (computes new orderKey)
-    tree.move({ nodeId: active, toFolderId: targetFolderId, index: targetIndex });
-    setTree(tree);
+  builder.moveNode({ nodeId: active, toFolderId: targetFolderId, index: targetIndex });
     setActiveId(null);
     setHoveredFolderId(null);
     force();
@@ -277,15 +261,23 @@ export const BookmarksDemo: React.FC = () => {
 
   const root = tree.root;
   const rootChildren = tree.listChildren(root.id);
+  const ops: OperationEnvelope[] = builder.log;
+
+  const handleReset = () => {
+    setBuilder(new TreeOpsBuilder());
+    setActiveId(null);
+    setHoveredFolderId(null);
+  };
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
       <div className="flex w-full max-w-2xl flex-col gap-3 p-4">
         <div className="flex items-center gap-2">
-          <div className="text-xl font-semibold">Bookmarks Demo</div>
-          <div className="ml-auto">
+          <div className="text-xl font-semibold">Bookmarks Demo (Ops-driven)</div>
+          <div className="ml-auto flex items-center gap-2">
             <Button variant="secondary" onClick={() => handleAddFolder(root.id)}>+ Root Folder</Button>
-            <Button className="ml-2" onClick={() => handleAddBookmark(root.id)}>+ Root Bookmark</Button>
+            <Button onClick={() => handleAddBookmark(root.id)}>+ Root Bookmark</Button>
+            <Button variant="outline" onClick={handleReset}>Reset</Button>
           </div>
         </div>
         <div className="text-xs text-muted-foreground">Drag and drop enabled (nested). Ordering uses fractional keys.</div>
@@ -303,15 +295,34 @@ export const BookmarksDemo: React.FC = () => {
             </SortableContext>
           )}
         </div>
-        <div className="mt-4">
-          <div className="mb-1 text-xs font-medium text-muted-foreground">Serialized tree (JSON)</div>
-          <pre
-            className="max-h-64 overflow-auto rounded-md border bg-accent/20 p-3 font-mono text-[11px] leading-tight"
-            aria-label="Serialized bookmarks tree JSON"
-            tabIndex={0}
-          >
-            {JSON.stringify(tree.serialize(), null, 2)}
-          </pre>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div>
+            <div className="mb-1 text-xs font-medium text-muted-foreground">Serialized tree (JSON)</div>
+            <pre
+              className="max-h-64 overflow-auto rounded-md border bg-accent/20 p-3 font-mono text-[11px] leading-tight"
+              aria-label="Serialized bookmarks tree JSON"
+              tabIndex={0}
+            >
+              {JSON.stringify(tree.serialize(), null, 2)}
+            </pre>
+          </div>
+          <div>
+            <div className="mb-1 text-xs font-medium text-muted-foreground">Operations log</div>
+            <div className="max-h-64 overflow-auto rounded-md border bg-accent/10 p-2">
+              {ops.length === 0 ? (
+                <div className="p-2 text-xs text-muted-foreground">No operations yet.</div>
+              ) : (
+                <ol className="space-y-1 text-xs">
+                  {ops.map((env, i) => (
+                    <li key={env.id} className="rounded bg-background p-1">
+                      <span className="mr-2 inline-block w-5 text-right text-muted-foreground">{i + 1}.</span>
+                      <code className="font-mono">{formatOp(env)}</code>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </div>
         </div>
       </div>
       <DragOverlay>
@@ -320,6 +331,38 @@ export const BookmarksDemo: React.FC = () => {
     </DndContext>
   );
 };
+
+// Pretty printer for operations (compact one-liners)
+function formatOp(env: OperationEnvelope): string {
+  const { op } = env;
+  switch (op.type) {
+    case "create_folder":
+      return `create_folder(title=${op.title}${op.parentId ? ", parent=" + op.parentId : ""}${
+        typeof op.index === "number" ? ", index=" + op.index : ""
+      })`;
+    case "create_bookmark":
+      return `create_bookmark(title=${op.title}, url=${op.url}${op.parentId ? ", parent=" + op.parentId : ""}${
+        typeof op.index === "number" ? ", index=" + op.index : ""
+      })`;
+    case "move_node":
+    case "move_item_to_folder":
+      return `${op.type}(id=${op.nodeId} -> ${op.toFolderId}${
+        typeof op.index === "number" ? ", index=" + op.index : ""
+      })`;
+    case "reorder":
+      return `reorder(folder=${op.folderId}, ${op.fromIndex} -> ${op.toIndex})`;
+    case "open_folder":
+      return `open_folder(${op.folderId})`;
+    case "close_folder":
+      return `close_folder(${op.folderId})`;
+    case "toggle_folder":
+      return `toggle_folder(${op.folderId}${typeof op.open === "boolean" ? ", open=" + op.open : ""})`;
+    case "remove_node":
+      return `remove_node(${op.nodeId})`;
+    default:
+      return JSON.stringify(op);
+  }
+}
 
 const ROOT_DROPZONE_ID = "root-dropzone" as const;
 const FOLDER_DROPZONE_PREFIX = "folder-dropzone:" as const;
