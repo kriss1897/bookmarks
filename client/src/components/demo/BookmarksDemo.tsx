@@ -24,6 +24,7 @@ export const BookmarksDemo: React.FC = () => {
   const [, force] = React.useReducer((c: number) => c + 1, 0);
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [hoveredFolderId, setHoveredFolderId] = React.useState<string | null>(null);
+  const [dropHint, setDropHint] = React.useState<string | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor)
@@ -71,28 +72,47 @@ export const BookmarksDemo: React.FC = () => {
     const id = String(event.active.id);
     setActiveId(id);
     setHoveredFolderId(null);
+    setDropHint("Dragging…");
   };
 
   const handleDragOver = (event: DragOverEvent) => {
     const overId = event.over ? String(event.over.id) : null;
     if (!overId) {
       setHoveredFolderId(null);
+      setDropHint(null);
       return;
     }
     if (overId === ROOT_DROPZONE_ID) {
       setHoveredFolderId(null);
+      setDropHint(`Move to Root (top)`);
       return;
     }
     if (overId.startsWith(FOLDER_DROPZONE_PREFIX)) {
-      setHoveredFolderId(overId.slice(FOLDER_DROPZONE_PREFIX.length));
+      const folderId = overId.slice(FOLDER_DROPZONE_PREFIX.length);
+      setHoveredFolderId(folderId);
+      const f = tree.getNode(folderId);
+      setDropHint(`Move into ${(f && isFolder(f) ? f.title : "folder")} (top)`);
       return;
     }
     const overNode = tree.getNode(overId);
     if (overNode && isFolder(overNode)) {
       setHoveredFolderId(overNode.id);
+      setDropHint(`Move into ${overNode.title} (append)`);
       return;
     }
     setHoveredFolderId(null);
+    if (overNode && overNode.parentId) {
+      const parent = tree.requireFolder(overNode.parentId);
+      // If dragging over itself
+      const self = activeId === overNode.id;
+      setDropHint(
+        self
+          ? `Drop here will keep position`
+          : `Insert before ${overNode.title} in ${parent.id === tree.rootId ? "Root" : tree.requireFolder(parent.id).title}`
+      );
+      return;
+    }
+    setDropHint(null);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -101,6 +121,7 @@ export const BookmarksDemo: React.FC = () => {
     if (!over || active === over) {
       setActiveId(null);
       setHoveredFolderId(null);
+      setDropHint(null);
       return;
     }
 
@@ -108,6 +129,7 @@ export const BookmarksDemo: React.FC = () => {
     if (!activeNode) {
       setActiveId(null);
       setHoveredFolderId(null);
+      setDropHint(null);
       return;
     }
 
@@ -116,6 +138,7 @@ export const BookmarksDemo: React.FC = () => {
       builder.moveNode({ nodeId: active, toFolderId: tree.rootId, index: 0 });
       setActiveId(null);
       setHoveredFolderId(null);
+      setDropHint(null);
       force();
       return;
     }
@@ -126,6 +149,7 @@ export const BookmarksDemo: React.FC = () => {
       builder.moveItemToFolder({ nodeId: active, toFolderId: folderId, index: 0 });
       setActiveId(null);
       setHoveredFolderId(null);
+      setDropHint(null);
       force();
       return;
     }
@@ -153,9 +177,10 @@ export const BookmarksDemo: React.FC = () => {
     }
 
     // Move using tree logic (computes new orderKey)
-  builder.moveNode({ nodeId: active, toFolderId: targetFolderId, index: targetIndex });
+    builder.moveNode({ nodeId: active, toFolderId: targetFolderId, index: targetIndex });
     setActiveId(null);
     setHoveredFolderId(null);
+    setDropHint(null);
     force();
   };
 
@@ -326,7 +351,7 @@ export const BookmarksDemo: React.FC = () => {
         </div>
       </div>
       <DragOverlay>
-        {activeId ? <DragPreview node={tree.getNode(activeId)!} /> : null}
+        {activeId ? <DragPreview node={tree.getNode(activeId)!} hint={dropHint ?? undefined} /> : null}
       </DragOverlay>
     </DndContext>
   );
@@ -337,18 +362,15 @@ function formatOp(env: OperationEnvelope): string {
   const { op } = env;
   switch (op.type) {
     case "create_folder":
-      return `create_folder(title=${op.title}${op.parentId ? ", parent=" + op.parentId : ""}${
-        typeof op.index === "number" ? ", index=" + op.index : ""
-      })`;
+      return `create_folder(title=${op.title}${op.parentId ? ", parent=" + op.parentId : ""}${typeof op.index === "number" ? ", index=" + op.index : ""
+        })`;
     case "create_bookmark":
-      return `create_bookmark(title=${op.title}, url=${op.url}${op.parentId ? ", parent=" + op.parentId : ""}${
-        typeof op.index === "number" ? ", index=" + op.index : ""
-      })`;
+      return `create_bookmark(title=${op.title}, url=${op.url}${op.parentId ? ", parent=" + op.parentId : ""}${typeof op.index === "number" ? ", index=" + op.index : ""
+        })`;
     case "move_node":
     case "move_item_to_folder":
-      return `${op.type}(id=${op.nodeId} -> ${op.toFolderId}${
-        typeof op.index === "number" ? ", index=" + op.index : ""
-      })`;
+      return `${op.type}(id=${op.nodeId} -> ${op.toFolderId}${typeof op.index === "number" ? ", index=" + op.index : ""
+        })`;
     case "reorder":
       return `reorder(folder=${op.folderId}, ${op.fromIndex} -> ${op.toIndex})`;
     case "open_folder":
@@ -429,11 +451,13 @@ const SortableItem: React.FC<React.PropsWithChildren<{ id: string }>> = ({ id, c
   );
 };
 
-const DragPreview: React.FC<{ node: TreeNode }> = ({ node }) => {
-  if (isFolder(node)) {
-    return <div className="rounded border bg-background px-2 py-1 text-sm">📁 {node.title}</div>;
-  }
-  return <div className="rounded border bg-background px-2 py-1 text-sm">🔗 {node.title}</div>;
+const DragPreview: React.FC<{ node: TreeNode; hint?: string }> = ({ node, hint }) => {
+  return (
+    <div className="rounded border bg-background px-2 py-1 text-sm">
+      <div>{isFolder(node) ? "📁" : "🔗"} {node.title}</div>
+      {hint ? <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div> : null}
+    </div>
+  );
 };
 
 type MenuAction = "createBookmark" | "createFolder" | "remove" | "moveUp" | "moveDown";
