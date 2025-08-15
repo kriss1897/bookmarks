@@ -122,6 +122,8 @@ export class DatabaseService {
 
   // Operation log operations
   async appendOperation(operation: OperationEnvelope): Promise<number> {
+    console.log('[Database] Appending operation to database:', operation.id);
+    
     const storedOperation: StoredOperation = {
       id: operation.id,
       ts: operation.ts,
@@ -130,7 +132,14 @@ export class DatabaseService {
       status: 'completed'
     };
 
-    return await this.db.operationLog.add(storedOperation);
+    try {
+      const dbId = await this.db.operationLog.add(storedOperation);
+      console.log('[Database] Operation saved with dbId:', dbId);
+      return dbId;
+    } catch (error) {
+      console.error('[Database] Failed to append operation:', error);
+      throw error;
+    }
   }
 
   async loadOperationLog(): Promise<StoredOperation[]> {

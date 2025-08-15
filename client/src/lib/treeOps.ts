@@ -58,13 +58,26 @@ export interface OperationEnvelope {
 /**
  * TreeOpsBuilder applies operations to a BookmarkTree and records them in a log.
  * It can also replay an existing log to rebuild a tree.
+ * 
+ * This base class handles operations in-memory only. Extend this class to add
+ * persistence capabilities (IndexedDB, localStorage, server-side, etc.).
  */
 export class TreeOpsBuilder {
   readonly tree: BookmarkTree;
   readonly log: OperationEnvelope[] = [];
 
-  constructor(init?: { tree?: ReturnType<BookmarkTree["serialize"]>; log?: OperationEnvelope[] }) {
-    this.tree = init?.tree ? BookmarkTree.fromJSON(init.tree) : new BookmarkTree();
+  constructor(init?: { tree?: ReturnType<BookmarkTree["serialize"]>; log?: OperationEnvelope[]; rootNode?: { id?: string; title?: string; isOpen?: boolean } }) {
+    if (init?.tree) {
+      this.tree = BookmarkTree.fromJSON(init.tree);
+    } else {
+      this.tree = new BookmarkTree();
+      // Initialize tree with root node if rootNode is provided
+      if (init?.rootNode !== undefined) {
+        const rootParams = init.rootNode || {};
+        this.tree.init(rootParams);
+      }
+    }
+    
     if (init?.log?.length) {
       this.replay(init.log, { record: false });
     }
@@ -75,7 +88,27 @@ export class TreeOpsBuilder {
     const env: OperationEnvelope = { id: this.generateOpId(), ts: Date.now(), op };
     this.apply(env);
     this.log.push(env);
+    // Hook for persistence - override in derived classes
+    this.persistOperation(env);
     return env;
+  }
+
+  /** 
+   * Persist an operation to storage. Override in derived classes for persistence.
+   * Base implementation does nothing (in-memory only).
+   */
+  protected async persistOperation(env: OperationEnvelope): Promise<void> {
+    // Base implementation: no persistence
+    void env; // Suppress unused parameter warning
+  }
+
+  /**
+   * Load operations from storage. Override in derived classes for persistence.
+   * Base implementation returns empty array (in-memory only).
+   */
+  protected async loadOperations(): Promise<OperationEnvelope[]> {
+    // Base implementation: no persistence
+    return [];
   }
 
   /** Apply an operation envelope without re-recording it (unless record=true). */
@@ -177,8 +210,8 @@ export class TreeOpsBuilder {
 }
 
 // Utility: Build a tree from a log, returning both tree and a normalized log copy.
-export const buildTreeFromOperations = (ops: OperationEnvelope[] | TreeOperation[]) => {
-  const builder = new TreeOpsBuilder();
+export const buildTreeFromOperations = (ops: OperationEnvelope[] | TreeOperation[], rootNode?: { id?: NodeId; title?: string; isOpen?: boolean }) => {
+  const builder = new TreeOpsBuilder({ rootNode });
   // Support bare operations by wrapping them into envelopes
   const envelopes: OperationEnvelope[] = ops.map((o) =>
     "op" in (o as OperationEnvelope)
@@ -186,5 +219,6 @@ export const buildTreeFromOperations = (ops: OperationEnvelope[] | TreeOperation
       : { id: builder["generateOpId"](), ts: Date.now(), op: o as TreeOperation }
   );
   builder.replay(envelopes, { record: true });
+
   return { tree: builder.tree, log: builder.log };
 };

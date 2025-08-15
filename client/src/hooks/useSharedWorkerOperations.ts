@@ -1,17 +1,20 @@
 /**
- * Hook that uses TreeOpsBuilder with SharedWorker operations for persistence
- * This fetches operations from SharedWorker and rebuilds tree locally using TreeOpsBuilder
+ * Hook that uses TreeBuilder with SharedWorker operations for persistence
+ * This fetches operations from SharedWorker and rebuilds tree locally using TreeBuilder
  */
 
 import { useState, useCallback, useEffect, useReducer } from 'react';
 import { useSharedWorkerConnection } from './useSharedWorkerConnection';
 import { useBroadcastChannel } from './useBroadcastChannel';
-import { TreeOpsBuilder, type OperationEnvelope, type TreeOperation } from '../lib/treeOps';
+import { createMemoryTreeBuilder, type OperationEnvelope, type TreeOperation } from '../lib/treeBuilderFactory';
 import { createAPIProxy } from '../workers/sharedWorkerAPI.utils';
 import type { BroadcastMessage } from '../workers/sharedWorkerAPI';
 
 export function useSharedWorkerOperations() {
-  const [builder, setBuilder] = useState(() => new TreeOpsBuilder({ rootNode: { title: 'Bookmarks', isOpen: true } }));
+  const [builder, setBuilder] = useState(() => createMemoryTreeBuilder({ 
+    rootNode: { title: 'Bookmarks', isOpen: true }, 
+    autoLoad: false 
+  }));
   const [, forceUpdate] = useReducer((c: number) => c + 1, 0);
   const [loading, setLoading] = useState(true);
   const [operationsLoaded, setOperationsLoaded] = useState(false);
@@ -40,7 +43,10 @@ export function useSharedWorkerOperations() {
       console.log(`Loaded ${operations.length} operations`);
       
       // Create a new builder and replay operations
-      const newBuilder = new TreeOpsBuilder({ rootNode: { title: 'Bookmarks', isOpen: true } });
+      const newBuilder = createMemoryTreeBuilder({ 
+        rootNode: { title: 'Bookmarks', isOpen: true }, 
+        autoLoad: false 
+      });
       newBuilder.replay(operations, { record: true });
       
       setBuilder(newBuilder);

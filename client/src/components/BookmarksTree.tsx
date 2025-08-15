@@ -1,7 +1,7 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { isFolder, type TreeNode } from "@/lib/bookmarksTree";
-import { TreeOpsBuilder, type OperationEnvelope } from "@/lib/treeOps";
+import { createMemoryTreeBuilder, type OperationEnvelope } from "@/lib/treeBuilderFactory";
 import {
   DndContext,
   DragOverlay,
@@ -19,7 +19,7 @@ import { createContext, useContext } from "react";
 
 // Lightweight, accessible demo of BookmarkTree operations
 export const BookmarksTree: React.FC = () => {
-  const [builder, setBuilder] = React.useState(() => new TreeOpsBuilder());
+  const [builder, setBuilder] = React.useState(() => createMemoryTreeBuilder({ autoLoad: false }));
   const tree = builder.tree;
   const [, force] = React.useReducer((c: number) => c + 1, 0);
   const [activeId, setActiveId] = React.useState<string | null>(null);
@@ -289,7 +289,7 @@ export const BookmarksTree: React.FC = () => {
   const ops: OperationEnvelope[] = builder.log;
 
   const handleReset = () => {
-    setBuilder(new TreeOpsBuilder());
+    setBuilder(createMemoryTreeBuilder({ autoLoad: false }));
     setActiveId(null);
     setHoveredFolderId(null);
   };

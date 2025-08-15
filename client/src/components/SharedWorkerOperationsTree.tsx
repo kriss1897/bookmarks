@@ -1,21 +1,21 @@
 /**
- * SharedWorker BookmarksTree component using the reusable tree component
- * This uses the SharedWorker API for persistence and multi-tab sync
+ * SharedWorker BookmarksTree component using operations-based approach
+ * This fetches operations from SharedWorker and uses TreeOpsBuilder to rebuild the tree locally
  */
 
 import React from "react";
-import { useSharedWorkerBookmarks } from "@/hooks/useSharedWorkerBookmarks";
+import { useSharedWorkerOperations } from "@/hooks/useSharedWorkerOperations";
 import { ReusableTreeComponent, type TreeOperations, type TreeState } from "./ReusableTreeComponent";
-import type { TreeNode, SerializedTree } from "@/lib/bookmarksTree";
-import type { OperationEnvelope } from "@/lib/treeOps";
 import { Button } from "./ui/button";
 
-export const SharedWorkerBookmarksTree: React.FC = () => {
+export const SharedWorkerOperationsTree: React.FC = () => {
   const {
     tree,
+    operations,
     loading,
     error,
     connected,
+    operationsLoaded,
     createFolder,
     createBookmark,
     removeNode,
@@ -23,33 +23,18 @@ export const SharedWorkerBookmarksTree: React.FC = () => {
     reorderNodes,
     toggleFolder,
     reconnect,
-    refreshTree,
-    getOperationLog
-  } = useSharedWorkerBookmarks();
-
-  const [operationLog, setOperationLog] = React.useState<OperationEnvelope[]>([]);
-
-  // Load operation log on mount and when connected
-  React.useEffect(() => {
-    if (connected && getOperationLog) {
-      getOperationLog()
-        .then(ops => setOperationLog(ops))
-        .catch(err => console.error('Failed to load operation log:', err));
-    }
-  }, [connected, getOperationLog]);
+    reload
+  } = useSharedWorkerOperations();
 
   if (loading) {
-    return <div>
-      <Button onClick={refreshTree}>Refresh</Button>
-    </div>
-  }
-
-  if (!connected) {
     return (
       <div className="flex items-center justify-center p-8">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-          <p className="text-sm text-muted-foreground">Connecting to SharedWorker...</p>
+          <p className="text-sm text-muted-foreground">
+            {connected ? 'Loading operations...' : 'Connecting to SharedWorker...'}
+          </p>
+          <Button onClick={reload} className="mt-2">Reload</Button>
         </div>
       </div>
     );
@@ -59,51 +44,29 @@ export const SharedWorkerBookmarksTree: React.FC = () => {
     return (
       <div className="p-4 border border-red-300 bg-red-50 rounded">
         <p className="text-red-700 mb-2">SharedWorker Error: {error}</p>
-        <button 
-          onClick={reconnect}
-          className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
-        >
-          Reconnect
-        </button>
+        <div className="flex gap-2">
+          <Button onClick={reconnect} variant="destructive">
+            Reconnect
+          </Button>
+          <Button onClick={reload} variant="outline">
+            Reload Operations
+          </Button>
+        </div>
       </div>
     );
   }
 
-  if (!tree) {
+  if (!operationsLoaded || !tree) {
     return (
       <div className="p-4 border border-gray-300 rounded">
-        <p className="text-gray-600">No tree data available</p>
+        <p className="text-gray-600">No operations loaded</p>
+        <Button onClick={reload} className="mt-2">Load Operations</Button>
       </div>
     );
   }
 
-  // Create a tree-like interface from the serialized tree data
-  const treeInterface = {
-    root: tree.nodes[tree.rootId],
-    rootId: tree.rootId,
-    getNode: (id: string): TreeNode | undefined => {
-      return tree.nodes[id];
-    },
-    requireNode: (id: string): TreeNode => {
-      const node = tree.nodes[id];
-      if (!node) throw new Error(`Node ${id} not found`);
-      return node;
-    },
-    requireFolder: (id: string): TreeNode & { kind: 'folder' } => {
-      const node = treeInterface.requireNode(id);
-      if (node.kind !== 'folder') throw new Error(`Node ${id} is not a folder`);
-      return node as TreeNode & { kind: 'folder' };
-    },
-    listChildren: (folderId: string): TreeNode[] => {
-      const folder = treeInterface.getNode(folderId);
-      if (!folder || folder.kind !== 'folder') return [];
-      return folder.children.map(childId => tree.nodes[childId]).filter(Boolean);
-    },
-    serialize: (): SerializedTree => tree
-  };
-
-  // Adapt SharedWorker API to TreeOperations interface
-  const operations: TreeOperations = {
+  // Adapt TreeOpsBuilder-style operations to TreeOperations interface
+  const treeOperations: TreeOperations = {
     createFolder: async (parentId: string, title = "New Folder") => {
       await createFolder({ parentId, title, isOpen: true });
     },
@@ -131,7 +94,7 @@ export const SharedWorkerBookmarksTree: React.FC = () => {
     },
     
     moveDown: async (parentId: string, index: number) => {
-      const folder = treeInterface.getNode(parentId);
+      const folder = tree.getNode(parentId);
       if (!folder || folder.kind !== 'folder') return;
       if (!folder.children || index >= folder.children.length - 1) return;
       await reorderNodes({ folderId: parentId, fromIndex: index, toIndex: index + 1 });
@@ -144,8 +107,8 @@ export const SharedWorkerBookmarksTree: React.FC = () => {
 
   // Create state interface
   const state: TreeState = {
-    tree: treeInterface,
-    operations: operationLog
+    tree,
+    operations
   };
 
   return (
@@ -161,13 +124,18 @@ export const SharedWorkerBookmarksTree: React.FC = () => {
           }`} />
           {connected ? 'Connected' : 'Disconnected'}
         </div>
-        <span className="text-xs text-muted-foreground">SharedWorker Multi-Tab Sync</span>
+        <span className="text-xs text-muted-foreground">
+          Operations-based ({operations.length} ops) {connected ? '🟢' : '🔴'}
+        </span>
+        <Button onClick={reload} size="sm" variant="outline">
+          Reload
+        </Button>
       </div>
       
       <ReusableTreeComponent
         state={state}
-        operations={operations}
-        title="SharedWorker Bookmarks (Persistent)"
+        operations={treeOperations}
+        title="SharedWorker Operations Tree (TreeOpsBuilder)"
         showOperationsLog={true}
         showSerializedTree={true}
         onReset={undefined} // No reset for persistent storage

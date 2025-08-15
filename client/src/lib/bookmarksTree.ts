@@ -57,7 +57,7 @@ export const isBookmark = (n: TreeNode | undefined | null): n is BookmarkNode =>
  */
 export class BookmarkTree {
   private nodes: Map<NodeId, TreeNode> = new Map();
-  private _rootId: NodeId;
+  private _rootId: NodeId | null = null;
   private static INITIAL_KEY = "a0"; // from fractional-indexing defaults
 
   constructor(init?: Partial<SerializedTree>) {
@@ -67,33 +67,52 @@ export class BookmarkTree {
       this.validateIntegrity();
       return;
     }
+    // Do not auto-create root node - must call init() explicitly
+  }
 
+  /** Initialize tree with a root node */
+  init(params: { id?: NodeId; title?: string; isOpen?: boolean } = {}): NodeId {
+    if (this._rootId !== null) {
+      throw new Error("Tree is already initialized with a root node");
+    }
+    
     const now = Date.now();
-    const rootId = init?.rootId ?? generateId();
-  const root: FolderNode = {
+    const rootId = params.id ?? generateId();
+    const root: FolderNode = {
       id: rootId,
       kind: "folder",
-      title: "Root",
+      title: params.title ?? "Root",
       parentId: null,
-      isOpen: true,
+      isOpen: params.isOpen ?? true,
       children: [],
       createdAt: now,
       updatedAt: now,
     };
+    
     this.nodes.set(root.id, root);
     this._rootId = root.id;
+    return rootId;
   }
 
   get rootId(): NodeId {
+    if (this._rootId === null) {
+      throw new Error("Tree is not initialized - call init() first");
+    }
     return this._rootId;
   }
 
   get root(): FolderNode {
+    if (this._rootId === null) {
+      throw new Error("Tree is not initialized - call init() first");
+    }
     return this.requireFolder(this._rootId);
   }
 
   /** Serialize into a plain object suitable for persistence */
   serialize(): SerializedTree {
+    if (this._rootId === null) {
+      throw new Error("Tree is not initialized - call init() first");
+    }
     const nodes: Record<NodeId, TreeNode> = {};
     for (const [id, node] of this.nodes.entries()) nodes[id] = { ...node } as TreeNode;
     return { rootId: this._rootId, nodes };
@@ -131,7 +150,11 @@ export class BookmarkTree {
 
   /** Create a folder inside parent folder (defaults to root). Returns new folder id. */
   createFolder(params: { parentId?: NodeId; title: string; id?: NodeId; isOpen?: boolean; index?: number }): NodeId {
-    const { parentId = this._rootId, title, id = generateId(), isOpen = true, index } = params;
+    const parentId = params.parentId ?? this.rootId; // Use getter which throws if not initialized
+    const { title, id = generateId(), isOpen = true, index } = params;
+
+    console.log(this.nodes);
+
     const parent = this.requireFolder(parentId);
     const now = Date.now();
     if (this.nodes.has(id)) throw new Error(`Duplicate id: ${id}`);
@@ -152,7 +175,8 @@ export class BookmarkTree {
 
   /** Create a bookmark inside parent folder (defaults to root). Returns new bookmark id. */
   createBookmark(params: { parentId?: NodeId; title: string; url: string; id?: NodeId; index?: number }): NodeId {
-    const { parentId = this._rootId, title, url, id = generateId(), index } = params;
+    const parentId = params.parentId ?? this.rootId; // Use getter which throws if not initialized
+    const { title, url, id = generateId(), index } = params;
     const parent = this.requireFolder(parentId);
     const now = Date.now();
     if (this.nodes.has(id)) throw new Error(`Duplicate id: ${id}`);
@@ -172,7 +196,7 @@ export class BookmarkTree {
 
   /** Remove a node (folder or bookmark). Removing a folder removes its subtree. Root cannot be removed. */
   remove(id: NodeId): void {
-    if (id === this._rootId) throw new Error("Cannot remove the root folder");
+    if (id === this.rootId) throw new Error("Cannot remove the root folder");
     const node = this.requireNode(id);
     // Remove from parent first
     const parent = node.parentId ? this.requireFolder(node.parentId) : null;
@@ -187,7 +211,7 @@ export class BookmarkTree {
   /** Move a node to a target folder at optional index. Prevents cycles. */
   move(params: { nodeId: NodeId; toFolderId: NodeId; index?: number }): void {
     const { nodeId, toFolderId, index } = params;
-    if (nodeId === this._rootId) throw new Error("Cannot move the root folder");
+    if (nodeId === this.rootId) throw new Error("Cannot move the root folder");
     const node = this.requireNode(nodeId);
     const fromParent = node.parentId ? this.requireFolder(node.parentId) : null;
     const toFolder = this.requireFolder(toFolderId);
@@ -200,7 +224,7 @@ export class BookmarkTree {
     }
 
     if (fromParent && fromParent.id === toFolder.id) {
-  // Reorder within same parent using fractional indexing keys
+      // Reorder within same parent using fractional indexing keys
       const currentIndex = fromParent.children.indexOf(nodeId);
       const targetIndex = index ?? fromParent.children.length - 1;
       if (currentIndex === -1) throw new Error("Inconsistent state: node not in parent");
@@ -208,7 +232,7 @@ export class BookmarkTree {
       // Compute new key based on neighbors at target position
       const [leftId, rightId] = this.getNeighborIdsAtIndex(toFolder, targetIndex, nodeId);
       const newKey = this.generateOrderKey(leftId, rightId);
-  node.orderKey = newKey;
+      node.orderKey = newKey;
       // Update order by sorting children
       this.sortChildrenByOrderKey(toFolder);
       this.touch([toFolder.id, node.id]);
@@ -219,23 +243,23 @@ export class BookmarkTree {
     if (fromParent) this.detachFromParent(fromParent, nodeId);
     // Attach to new parent
     node.parentId = toFolderId;
-  this.insertIntoParent(toFolder, nodeId, index);
+    this.insertIntoParent(toFolder, nodeId, index);
     this.touch([toFolder.id, node.id]);
   }
 
   /** Reorder items inside a folder (from -> to). */
   reorder(params: { folderId: NodeId; fromIndex: number; toIndex: number }): void {
     const { folderId, fromIndex, toIndex } = params;
-  const folder = this.requireFolder(folderId);
-  if (folder.children.length === 0) return;
-  // Assign new key to the moved child based on target neighbors, then sort
-  const childId = folder.children[clampIndex(fromIndex, folder.children.length)];
-  const [leftId, rightId] = this.getNeighborIdsAtIndex(folder, toIndex, childId);
-  const newKey = this.generateOrderKey(leftId, rightId);
-  const node = this.requireNode(childId);
-  node.orderKey = newKey;
-  this.sortChildrenByOrderKey(folder);
-  this.touch([folder.id, childId]);
+    const folder = this.requireFolder(folderId);
+    if (folder.children.length === 0) return;
+    // Assign new key to the moved child based on target neighbors, then sort
+    const childId = folder.children[clampIndex(fromIndex, folder.children.length)];
+    const [leftId, rightId] = this.getNeighborIdsAtIndex(folder, toIndex, childId);
+    const newKey = this.generateOrderKey(leftId, rightId);
+    const node = this.requireNode(childId);
+    node.orderKey = newKey;
+    this.sortChildrenByOrderKey(folder);
+    this.touch([folder.id, childId]);
   }
 
   /** Toggle a folder's open state */
@@ -344,6 +368,10 @@ export class BookmarkTree {
 
   /** Validate parent/child relationships integrity */
   private validateIntegrity(): void {
+    if (this._rootId === null) {
+      throw new Error("Tree is not initialized - call init() first");
+    }
+    
     // 1. Root exists and is a folder
     const root = this.nodes.get(this._rootId);
     if (!root || !isFolder(root) || root.parentId !== null) {
@@ -387,10 +415,6 @@ const clampInsertionIndex = (index: number, length: number): number => {
 // Convenience factory helpers
 export const createEmptyTree = (title: string = "Root"): BookmarkTree => {
   const tree = new BookmarkTree();
-  if (title && title !== "Root") {
-    const root = tree.root;
-    root.title = title;
-    root.updatedAt = Date.now();
-  }
+  tree.init({ title });
   return tree;
 };

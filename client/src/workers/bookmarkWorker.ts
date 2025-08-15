@@ -4,61 +4,33 @@
  */
 
 import * as Comlink from 'comlink';
-import { TreeOpsBuilder } from '../lib/treeOps';
-import { databaseService } from './database';
+import { createPersistentTreeBuilder } from '../lib/treeBuilderFactory';
+import type { TreeBuilder } from '../lib/treeBuilderFactory';
 import type { SharedWorkerAPI, BroadcastMessage, TabConnection } from './sharedWorkerAPI';
 import type { NodeId, TreeNode } from '../lib/bookmarksTree';
 
 class BookmarkSharedWorker implements SharedWorkerAPI {
-  private builder = new TreeOpsBuilder();
+  private builder: TreeBuilder;
   private connections = new Map<string, TabConnection>();
   private broadcastChannel = new BroadcastChannel('bookmarks-sync');
-  private isInitialized = false;
 
   constructor() {
     console.log('[SharedWorker] BookmarkSharedWorker initialized');
-    this.initializeFromDatabase();
-  }
-
-  // Initialize tree from persisted data
-  private async initializeFromDatabase(): Promise<void> {
-    try {
-      console.log('[SharedWorker] Loading tree from database...');
-      
-      // Load stored operations and replay them to reconstruct tree
-      const storedOperations = await databaseService.loadOperationLog();
-      console.log(`[SharedWorker] Loaded ${storedOperations.length} operations from database`);
-      
-      if (storedOperations.length > 0) {
-        // Convert stored operations back to OperationEnvelope format
-        const operationEnvelopes = storedOperations.map(stored => ({
-          id: stored.id,
-          ts: stored.ts,
-          op: stored.op
-        }));
-        
-        // Create builder and replay operations
-        this.builder = new TreeOpsBuilder();
-        this.builder.replay(operationEnvelopes, { record: true });
-        console.log('[SharedWorker] Tree reconstructed from operation log');
-      } else {
-        console.log('[SharedWorker] No stored operations, starting with empty tree');
-        this.builder = new TreeOpsBuilder();
-      }
-      
-      this.isInitialized = true;
-    } catch (error) {
-      console.error('[SharedWorker] Failed to initialize from database:', error);
-      this.builder = new TreeOpsBuilder(); // Fallback to empty tree
-      this.isInitialized = true;
-    }
+    // Create TreeBuilder with persistent storage
+    this.builder = createPersistentTreeBuilder({ 
+      rootNode: { title: 'Bookmarks', id: 'root', isOpen: true }
+    });
+    // Initialization happens automatically with autoLoad: true (default)
   }
 
   // Wait for initialization to complete
+  async waitForInitialization(): Promise<void> {
+    await this.builder.waitForInitialization();
+  }
+
+  // Ensure initialization is complete before operations
   private async ensureInitialized(): Promise<void> {
-    while (!this.isInitialized) {
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
+    await this.waitForInitialization();
   }
 
   // Connection Management
@@ -90,13 +62,8 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     const operation = this.builder.createFolder({ ...params, id: nodeId });
     const node = this.builder.tree.requireNode(nodeId);
     
-    // Persist operation to database
-    try {
-      await databaseService.appendOperation(operation);
-      console.log('[SharedWorker] Operation persisted:', operation.op.type);
-    } catch (error) {
-      console.error('[SharedWorker] Failed to persist operation:', error);
-    }
+    // PersistentTreeOpsBuilder automatically handles persistence
+    console.log('[SharedWorker] Created folder:', operation.op.type);
     
     this.broadcast({
       type: 'node_created',
@@ -115,13 +82,8 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     const operation = this.builder.createBookmark({ ...params, id: nodeId });
     const node = this.builder.tree.requireNode(nodeId);
     
-    // Persist operation to database
-    try {
-      await databaseService.appendOperation(operation);
-      console.log('[SharedWorker] Operation persisted:', operation.op.type);
-    } catch (error) {
-      console.error('[SharedWorker] Failed to persist operation:', error);
-    }
+    // PersistentTreeOpsBuilder automatically handles persistence
+    console.log('[SharedWorker] Created bookmark:', operation.op.type);
     
     this.broadcast({
       type: 'node_created',
@@ -195,16 +157,38 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
   // Operation Log
   async getOperationLog() {
-    return [...this.builder.log];
+    try {
+      // PersistentTreeOpsBuilder handles loading, but we can access via the builder
+      console.log(`[SharedWorker] Returning ${this.builder.log.length} operations from builder`);
+      return [...this.builder.log];
+    } catch (error) {
+      console.error('[SharedWorker] Failed to get operation log:', error);
+      return [];
+    }
   }
 
   async appendOperation(operation: Parameters<SharedWorkerAPI['appendOperation']>[0]) {
-    this.builder.apply(operation);
+    console.log('[SharedWorker] Appending operation:', operation.id, operation.op);
     
-    this.broadcast({
-      type: 'operation_processed',
-      operation
-    });
+    try {
+      // Ensure we're initialized
+      await this.ensureInitialized();
+      
+      // Apply operation to builder (PersistentTreeOpsBuilder handles persistence automatically)
+      this.builder.apply(operation);
+      console.log('[SharedWorker] Operation applied to builder');
+      
+      // Broadcast to all tabs (including the originating tab)
+      this.broadcast({
+        type: 'operation_processed',
+        operation
+      });
+      
+      console.log('[SharedWorker] Operation processed and broadcasted:', operation.id);
+    } catch (error) {
+      console.error('[SharedWorker] Failed to append operation:', error);
+      throw error;
+    }
   }
 
   // Private Methods
