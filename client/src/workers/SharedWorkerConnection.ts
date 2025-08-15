@@ -73,7 +73,7 @@ export class SharedWorkerConnection {
 
       // Create SharedWorker
       this.worker = new SharedWorker(
-        new URL('../workers/bookmarkWorker.ts', import.meta.url),
+        new URL('../workers/bookmark.worker.ts', import.meta.url),
         { type: 'module' }
       );
 

@@ -6,15 +6,12 @@
 import { useState, useCallback, useEffect, useReducer } from 'react';
 import { useSharedWorkerConnection } from './useSharedWorkerConnection';
 import { useBroadcastChannel } from './useBroadcastChannel';
-import { createMemoryTreeBuilder, type OperationEnvelope, type TreeOperation } from '../lib/treeBuilderFactory';
+import { TreeBuilder, type OperationEnvelope, type TreeOperation } from '../lib/builder/treeBuilder';
 import { createAPIProxy } from '../workers/sharedWorkerAPI.utils';
 import type { BroadcastMessage } from '../workers/sharedWorkerAPI';
 
 export function useSharedWorkerOperations() {
-  const [builder, setBuilder] = useState(() => createMemoryTreeBuilder({ 
-    rootNode: { title: 'Bookmarks', isOpen: true }, 
-    autoLoad: false 
-  }));
+  const [builder, setBuilder] = useState<TreeBuilder | null>(null);
   const [, forceUpdate] = useReducer((c: number) => c + 1, 0);
   const [loading, setLoading] = useState(true);
   const [operationsLoaded, setOperationsLoaded] = useState(false);
@@ -43,11 +40,16 @@ export function useSharedWorkerOperations() {
       console.log(`Loaded ${operations.length} operations`);
       
       // Create a new builder and replay operations
-      const newBuilder = createMemoryTreeBuilder({ 
+      const newBuilder = new TreeBuilder({ 
         rootNode: { title: 'Bookmarks', isOpen: true }, 
         autoLoad: false 
       });
-      newBuilder.replay(operations, { record: true });
+      
+      // Wait for initialization
+      await newBuilder.waitForInitialization();
+      
+      // Replay operations
+      await newBuilder.replay(operations, { record: true });
       
       setBuilder(newBuilder);
       setOperationsLoaded(true);
@@ -60,16 +62,16 @@ export function useSharedWorkerOperations() {
   }, [api, workerProxy, isConnected]);
 
   // Handle broadcast messages for real-time operation sync
-  const handleMessage = useCallback((message: BroadcastMessage) => {
+  const handleMessage = useCallback(async (message: BroadcastMessage) => {
     console.log('Received operation broadcast:', message.type);
     
     switch (message.type) {
       case 'operation_processed':
         // Apply ALL operations (local and remote) when received from broadcast
-        if (message.operation) {
+        if (message.operation && builder) {
           try {
             console.log('Applying operation from broadcast:', message.operation.id);
-            builder.apply(message.operation, { record: true });
+            await builder.apply(message.operation, { record: true });
             forceUpdate();
           } catch (err) {
             console.error('Failed to apply broadcasted operation:', message.operation, err);
@@ -128,9 +130,10 @@ export function useSharedWorkerOperations() {
 
   // Tree operation methods
   const createFolder = useCallback(async (params: { parentId?: string; title: string; isOpen?: boolean; index?: number }) => {
+    if (!builder) return;
     const actualParams = {
       ...params,
-      parentId: params.parentId || builder.tree.rootId
+      parentId: params.parentId || builder.bookmarkTree.rootId
     };
     console.log('Creating folder with params:', actualParams);
     return executeOperation({
@@ -140,9 +143,10 @@ export function useSharedWorkerOperations() {
   }, [executeOperation, builder]);
 
   const createBookmark = useCallback(async (params: { parentId?: string; title: string; url: string; index?: number }) => {
+    if (!builder) return;
     const actualParams = {
       ...params,
-      parentId: params.parentId || builder.tree.rootId
+      parentId: params.parentId || builder.bookmarkTree.rootId
     };
     console.log('Creating bookmark with params:', actualParams);
     return executeOperation({
@@ -185,9 +189,9 @@ export function useSharedWorkerOperations() {
   }, [api]);
 
   return {
-    // Tree state
-    tree: builder.tree,
-    operations: builder.log,
+    // Tree state - now just the BookmarkTree directly
+    tree: builder ? { bookmarkTree: builder.bookmarkTree } : null,
+    operations: builder?.log || [],
     
     // Connection state
     loading,

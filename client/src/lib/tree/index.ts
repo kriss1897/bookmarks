@@ -36,8 +36,5 @@ export {
 
 // Factory functions
 export { 
-  createMemoryBookmarkTree,
-  createIndexedDBBookmarkTree,
-  createTreeFromSerialized,
-  migrateFromLegacyTree 
+  createMemoryBookmarkTree
 } from './factory';

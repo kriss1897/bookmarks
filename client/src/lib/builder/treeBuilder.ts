@@ -3,7 +3,7 @@
  * Uses an abstract storage interface to support both in-memory and persistent storage.
  */
 
-import { BookmarkTree, type NodeId } from "./bookmarksTree";
+import { BookmarkTree, createMemoryBookmarkTree, type NodeId } from "../tree";
 import type { OperationStorage } from "./storage";
 import { MemoryOperationStorage } from "./storage";
 
@@ -64,7 +64,7 @@ export interface OperationEnvelope {
 
 export interface TreeBuilderConfig {
   /** Existing tree data to initialize from */
-  tree?: ReturnType<BookmarkTree["serialize"]>;
+  tree?: Record<string, unknown>; // Legacy tree data for migration
   /** Existing operation log to replay */
   log?: OperationEnvelope[];
   /** Root node configuration */
@@ -80,11 +80,12 @@ export interface TreeBuilderConfig {
  * It can replay existing logs to rebuild trees and supports pluggable storage backends.
  */
 export class TreeBuilder {
-  readonly tree: BookmarkTree;
+  readonly bookmarkTree: BookmarkTree;
   readonly log: OperationEnvelope[] = [];
   private readonly storage: OperationStorage;
   private isInitialized = false;
   private rootNodeConfig: { id?: string; title?: string; isOpen?: boolean };
+  private treeInitialized = false;
 
   constructor(config: TreeBuilderConfig = {}) {
     // Initialize storage
@@ -96,24 +97,25 @@ export class TreeBuilder {
     // When auto-loading, don't create root node in constructor - handle it in initialize
     const shouldAutoLoad = config.autoLoad !== false;
 
-    // Initialize tree
-    if (config.tree) {
-      console.log('[TreeBuilder] Initializing with existing tree data');
-      this.tree = BookmarkTree.fromJSON(config.tree);
-    } else {
-      console.log('[TreeBuilder] Initializing with empty tree', shouldAutoLoad);
-      this.tree = new BookmarkTree();
-      // Initialize tree with root node if not auto-loading
-      if (!shouldAutoLoad) {
-        this.tree.init(this.rootNodeConfig);
-      } else {
-        this.tree.init();
-      }
+    // Create the new BookmarkTree instance
+    this.bookmarkTree = createMemoryBookmarkTree({
+      rootTitle: this.rootNodeConfig.title,
+      enableEvents: false
+    });
+
+    // Handle legacy tree data migration if provided
+    if (config.tree && !shouldAutoLoad) {
+      console.log('[TreeBuilder] Legacy tree data provided, will initialize after setup');
+      // We'll handle this in initializeTree method
     }
-    
+
     // Replay existing log if provided (only for non-auto-load scenarios)
     if (config.log?.length && !shouldAutoLoad) {
-      this.replay(config.log, { record: false });
+      console.log('[TreeBuilder] Replaying provided log with', config.log.length, 'operations');
+      // Handle async replay after tree initialization
+      this.initializeTree().then(() => {
+        this.replay(config.log!, { record: false });
+      });
     }
 
     // Auto-load from storage if requested (default: true)
@@ -121,7 +123,32 @@ export class TreeBuilder {
       console.log('[TreeBuilder] Auto-loading from storage');
       this.initialize();
     } else {
-      this.isInitialized = true;
+      // Initialize tree immediately for non-auto-load scenarios
+      this.initializeTree();
+    }
+  }
+
+  /**
+   * Initialize the BookmarkTree with root node
+   */
+  private async initializeTree(): Promise<void> {
+    if (this.treeInitialized) return;
+    
+    try {
+      await this.bookmarkTree.initializeBookmarkTree({
+        rootTitle: this.rootNodeConfig.title || 'Bookmarks'
+      });
+      
+      this.treeInitialized = true;
+      
+      if (!this.isInitialized) {
+        this.isInitialized = true;
+      }
+      
+      console.log('[TreeBuilder] Tree initialized with root:', this.bookmarkTree.rootId);
+    } catch (error) {
+      console.error('[TreeBuilder] Failed to initialize tree:', error);
+      throw error;
     }
   }
 
@@ -135,6 +162,9 @@ export class TreeBuilder {
 
     try {
       console.log('[TreeBuilder] Initializing from storage...');
+      
+      // First initialize the tree
+      await this.initializeTree();
       
       // Wait for storage to be ready
       const isReady = await this.storage.isReady();
@@ -151,44 +181,31 @@ export class TreeBuilder {
         this.replay(storedOperations, { record: true });
         console.log('[TreeBuilder] Tree reconstructed from operation log');
       } else {
-        console.log('[TreeBuilder] No stored operations found, creating and persisting root node...');
+        console.log('[TreeBuilder] No stored operations found, creating and persisting root operation...');
         
-        // Check if root already exists (from constructor)
-        if (this.tree.rootId) {
-          console.log('[TreeBuilder] Root node already exists in memory, creating operation for existing root');
-          // Create operation envelope for existing root to ensure it's persisted
-          const existingRoot = this.tree.root!;
-          const rootOperation: OperationEnvelope = {
-            id: this.generateOpId(),
-            ts: Date.now(),
-            op: {
-              type: 'create_folder' as const,
-              id: existingRoot.id,
-              title: existingRoot.title,
-              isOpen: existingRoot.isOpen,
-              parentId: undefined,
-              index: undefined
-            }
-          };
-          // Manually persist this operation and add to log
-          await this.storage.persistOperation(rootOperation);
-          this.log.push(rootOperation);
-          console.log('[TreeBuilder] Root operation created for existing node:', rootOperation.id);
-        } else {
-          console.log('[TreeBuilder] No root operation found, creating new root folder');
-          // Create root folder operation and persist it to storage
-          // This ensures the root node creation is stored as the first operation
-          this.createFolder({
-            title: this.rootNodeConfig.title || 'Bookmarks',
+        // Create root folder operation and persist it to storage
+        // This ensures the root node creation is stored as the first operation
+        const rootOperation: OperationEnvelope = {
+          id: this.generateOpId(),
+          ts: Date.now(),
+          op: {
+            type: 'create_folder' as const,
             id: this.rootNodeConfig.id || 'root',
-            isOpen: this.rootNodeConfig.isOpen ?? true
-          });
-          console.log('[TreeBuilder] New root folder created and persisted');
-        }
+            title: this.rootNodeConfig.title || 'Bookmarks',
+            isOpen: this.rootNodeConfig.isOpen ?? true,
+            parentId: undefined,
+            index: undefined
+          }
+        };
+        
+        // Manually persist this operation and add to log
+        await this.storage.persistOperation(rootOperation);
+        this.log.push(rootOperation);
+        console.log('[TreeBuilder] Root operation created and persisted:', rootOperation.id);
       }
       
       this.isInitialized = true;
-      console.log('[TreeBuilder] Root node ID:', this.tree.rootId);
+      console.log('[TreeBuilder] Initialization complete. Root node ID:', this.bookmarkTree.rootId);
       
     } catch (error) {
       console.error('[TreeBuilder] Failed to initialize from storage:', error);
@@ -207,52 +224,54 @@ export class TreeBuilder {
   }
 
   /** Append an operation to the log and apply it to the in-memory tree. */
-  dispatch(op: TreeOperation): OperationEnvelope {
+  async dispatch(op: TreeOperation): Promise<OperationEnvelope> {
     const env: OperationEnvelope = { id: this.generateOpId(), ts: Date.now(), op };
-    this.apply(env);
+    await this.apply(env);
     this.log.push(env);
     // Persist to storage
-    this.storage.persistOperation(env);
+    await this.storage.persistOperation(env);
     return env;
   }
 
   /** Apply an operation envelope without re-recording it (unless record=true). */
-  apply(env: OperationEnvelope, opts?: { record?: boolean }): void {
-    this.applyOperation(env.op);
+  async apply(env: OperationEnvelope, opts?: { record?: boolean }): Promise<void> {
+    await this.applyOperation(env.op);
     if (opts?.record) this.log.push(env);
   }
 
   /** Apply a list of operations in order. Useful for rebuilding a tree from a log. */
-  replay(envelopes: OperationEnvelope[], opts?: { record?: boolean }): void {
-    for (const env of envelopes) this.apply(env, opts);
+  async replay(envelopes: OperationEnvelope[], opts?: { record?: boolean }): Promise<void> {
+    for (const env of envelopes) {
+      await this.apply(env, opts);
+    }
   }
 
   // Convenience helpers that create specific operations
-  createFolder(op: Omit<CreateFolderOp, "type">): OperationEnvelope {
+  createFolder(op: Omit<CreateFolderOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "create_folder", ...op });
   }
-  createBookmark(op: Omit<CreateBookmarkOp, "type">): OperationEnvelope {
+  createBookmark(op: Omit<CreateBookmarkOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "create_bookmark", ...op });
   }
-  moveNode(op: Omit<MoveNodeOp, "type">): OperationEnvelope {
+  moveNode(op: Omit<MoveNodeOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "move_node", ...op });
   }
-  moveItemToFolder(op: Omit<MoveNodeOp, "type">): OperationEnvelope {
+  moveItemToFolder(op: Omit<MoveNodeOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "move_item_to_folder", ...op });
   }
-  reorder(op: Omit<ReorderOp, "type">): OperationEnvelope {
+  reorder(op: Omit<ReorderOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "reorder", ...op });
   }
-  openFolder(op: Omit<OpenFolderOp, "type">): OperationEnvelope {
+  openFolder(op: Omit<OpenFolderOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "open_folder", ...op });
   }
-  closeFolder(op: Omit<CloseFolderOp, "type">): OperationEnvelope {
+  closeFolder(op: Omit<CloseFolderOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "close_folder", ...op });
   }
-  toggleFolder(op: Omit<ToggleFolderOp, "type">): OperationEnvelope {
+  toggleFolder(op: Omit<ToggleFolderOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "toggle_folder", ...op });
   }
-  removeNode(op: Omit<RemoveNodeOp, "type">): OperationEnvelope {
+  removeNode(op: Omit<RemoveNodeOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "remove_node", ...op });
   }
 
@@ -271,46 +290,52 @@ export class TreeBuilder {
   }
 
   /** Apply a single operation to the underlying tree. */
-  private applyOperation(op: TreeOperation): void {
+  private async applyOperation(op: TreeOperation): Promise<void> {
     switch (op.type) {
       case "create_folder": {
-        this.tree.createFolder({
+        await this.bookmarkTree.createFolder({
           id: op.id,
           parentId: op.parentId,
           title: op.title,
           isOpen: op.isOpen,
           index: op.index,
         });
-        return;
+        break;
       }
       case "create_bookmark": {
-        this.tree.createBookmark({ id: op.id, parentId: op.parentId, title: op.title, url: op.url, index: op.index });
-        return;
+        await this.bookmarkTree.createBookmark({ 
+          id: op.id, 
+          parentId: op.parentId, 
+          title: op.title, 
+          url: op.url, 
+          index: op.index 
+        });
+        break;
       }
       case "move_node":
       case "move_item_to_folder": {
-        this.tree.move({ nodeId: op.nodeId, toFolderId: op.toFolderId, index: op.index });
-        return;
+        await this.bookmarkTree.move({ nodeId: op.nodeId, toFolderId: op.toFolderId, index: op.index });
+        break;
       }
       case "reorder": {
-        this.tree.reorder({ folderId: op.folderId, fromIndex: op.fromIndex, toIndex: op.toIndex });
-        return;
+        await this.bookmarkTree.reorder({ folderId: op.folderId, fromIndex: op.fromIndex, toIndex: op.toIndex });
+        break;
       }
       case "open_folder": {
-        this.tree.openFolder(op.folderId);
-        return;
+        await this.bookmarkTree.openFolder(op.folderId);
+        break;
       }
       case "close_folder": {
-        this.tree.closeFolder(op.folderId);
-        return;
+        await this.bookmarkTree.closeFolder(op.folderId);
+        break;
       }
       case "toggle_folder": {
-        this.tree.toggleFolder(op.folderId, op.open);
-        return;
+        await this.bookmarkTree.toggleFolder(op.folderId, op.open);
+        break;
       }
       case "remove_node": {
-        this.tree.remove(op.nodeId);
-        return;
+        await this.bookmarkTree.remove(op.nodeId);
+        break;
       }
       default: {
         const _exhaustive: never = op as never;
@@ -329,7 +354,7 @@ export class TreeBuilder {
 }
 
 // Utility: Build a tree from a log, returning both tree and a normalized log copy.
-export const buildTreeFromOperations = (
+export const buildTreeFromOperations = async (
   ops: OperationEnvelope[] | TreeOperation[], 
   rootNode?: { id?: NodeId; title?: string; isOpen?: boolean },
   storage?: OperationStorage
@@ -340,13 +365,17 @@ export const buildTreeFromOperations = (
     autoLoad: false 
   });
   
+  // Wait for tree initialization
+  await builder.waitForInitialization();
+  
   // Support bare operations by wrapping them into envelopes
   const envelopes: OperationEnvelope[] = ops.map((o) =>
     "op" in (o as OperationEnvelope)
       ? (o as OperationEnvelope)
       : { id: builder["generateOpId"](), ts: Date.now(), op: o as TreeOperation }
   );
-  builder.replay(envelopes, { record: true });
+  
+  await builder.replay(envelopes, { record: true });
 
-  return { tree: builder.tree, log: builder.log };
+  return { tree: builder.bookmarkTree, log: builder.log };
 };

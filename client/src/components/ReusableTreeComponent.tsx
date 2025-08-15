@@ -5,8 +5,8 @@
 
 import React, { createContext, useContext } from "react";
 import { Button } from "@/components/ui/button";
-import { isFolder, type TreeNode, type SerializedTree } from "@/lib/bookmarksTree";
-import type { TreeOperation } from "@/lib/treeOps";
+import { isFolder, type BookmarkTreeNode, type BookmarkTree } from "@/lib/tree/BookmarkTree";
+import type { TreeOperation } from "@/lib/builder/treeBuilder";
 import {
   DndContext,
   DragOverlay,
@@ -33,15 +33,7 @@ export interface TreeOperations {
 }
 
 export interface TreeState {
-  tree: {
-    root: TreeNode;
-    rootId: string;
-    getNode: (id: string) => TreeNode | undefined;
-    requireNode: (id: string) => TreeNode;
-    requireFolder: (id: string) => TreeNode & { kind: 'folder' };
-    listChildren: (folderId: string) => TreeNode[];
-    serialize: () => SerializedTree;
-  };
+  bookmarkTree: BookmarkTree;
   operations?: Array<{ id: string; op: TreeOperation }>;
 }
 
@@ -82,15 +74,93 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [hoveredFolderId, setHoveredFolderId] = React.useState<string | null>(null);
   const [dropHint, setDropHint] = React.useState<string | null>(null);
+  const [rootNode, setRootNode] = React.useState<BookmarkTreeNode | null>(null);
+  const [rootChildren, setRootChildren] = React.useState<BookmarkTreeNode[]>([]);
+  const [loading, setLoading] = React.useState(true);
   
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor)
   );
 
-  const { tree } = state;
-  const root = tree.root;
-  const rootChildren = tree.listChildren(root.id);
+  const { bookmarkTree } = state;
+
+  // Load tree data
+  React.useEffect(() => {
+    const loadTreeData = async () => {
+      try {
+        setLoading(true);
+        const root = await bookmarkTree.getRoot();
+        const children = await bookmarkTree.listChildren(root.id);
+        setRootNode(root);
+        setRootChildren(children);
+      } catch (error) {
+        console.error('Failed to load tree data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadTreeData();
+  }, [bookmarkTree]);
+
+  const [serializedTree, setSerializedTree] = React.useState<Record<string, BookmarkTreeNode> | null>(null);
+  const [dragPreviewNode, setDragPreviewNode] = React.useState<BookmarkTreeNode | null>(null);
+
+  // Load serialized tree data when needed
+  React.useEffect(() => {
+    if (showSerializedTree) {
+      const loadSerializedTree = async () => {
+        try {
+          // Load all nodes into cache first
+          await bookmarkTree.loadFullTree();
+          
+          // Now access the cache (we'll need to make this public or create a getter)
+          const result: Record<string, BookmarkTreeNode> = {};
+          // For now, let's just iterate through the root and its descendants
+          const addNodeToResult = async (nodeId: string) => {
+            const node = await bookmarkTree.getNode(nodeId);
+            if (node) {
+              result[node.id] = node;
+              if (node.kind === 'folder') {
+                const children = await bookmarkTree.listChildren(node.id);
+                for (const child of children) {
+                  await addNodeToResult(child.id);
+                }
+              }
+            }
+          };
+          
+          await addNodeToResult(bookmarkTree.rootId);
+          setSerializedTree(result);
+        } catch (error) {
+          console.error('Failed to serialize tree:', error);
+        }
+      };
+      loadSerializedTree();
+    }
+  }, [bookmarkTree, showSerializedTree, rootChildren]); // Re-serialize when children change
+
+  // Load drag preview node
+  React.useEffect(() => {
+    if (activeId) {
+      const loadDragPreviewNode = async () => {
+        try {
+          const node = await bookmarkTree.getNode(activeId);
+          setDragPreviewNode(node || null);
+        } catch (error) {
+          console.error('Failed to load drag preview node:', error);
+        }
+      };
+      loadDragPreviewNode();
+    } else {
+      setDragPreviewNode(null);
+    }
+  }, [activeId, bookmarkTree]);
+
+  if (loading || !rootNode) {
+    return <div className="p-4">Loading tree...</div>;
+  }
 
   const handleAddFolder = async (parentId: string) => {
     await operations.createFolder(parentId, "New Folder");
@@ -108,7 +178,7 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
     setDropHint("Dragging…");
   };
 
-  const handleDragOver = (event: DragOverEvent) => {
+  const handleDragOver = async (event: DragOverEvent) => {
     const overId = event.over ? String(event.over.id) : null;
     if (!overId) {
       setHoveredFolderId(null);
@@ -123,11 +193,11 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
     if (overId.startsWith(FOLDER_DROPZONE_PREFIX)) {
       const folderId = overId.slice(FOLDER_DROPZONE_PREFIX.length);
       setHoveredFolderId(folderId);
-      const f = tree.getNode(folderId);
+      const f = await bookmarkTree.getNode(folderId);
       setDropHint(`Move into ${(f && isFolder(f) ? f.title : "folder")} (top)`);
       return;
     }
-    const overNode = tree.getNode(overId);
+    const overNode = await bookmarkTree.getNode(overId);
     if (overNode && isFolder(overNode)) {
       setHoveredFolderId(overNode.id);
       setDropHint(`Move into ${overNode.title} (append)`);
@@ -135,12 +205,12 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
     }
     setHoveredFolderId(null);
     if (overNode && overNode.parentId) {
-      const parent = tree.requireFolder(overNode.parentId);
+      const parent = await bookmarkTree.requireFolder(overNode.parentId);
       const self = activeId === overNode.id;
       setDropHint(
         self
           ? `Drop here will keep position`
-          : `Insert before ${overNode.title} in ${parent.id === tree.rootId ? "Root" : tree.requireFolder(parent.id).title}`
+          : `Insert before ${overNode.title} in ${parent.id === bookmarkTree.rootId ? "Root" : (await bookmarkTree.requireFolder(parent.id)).title}`
       );
       return;
     }
@@ -157,7 +227,7 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
       return;
     }
 
-    const activeNode = tree.getNode(active);
+    const activeNode = await bookmarkTree.getNode(active);
     if (!activeNode) {
       setActiveId(null);
       setHoveredFolderId(null);
@@ -167,7 +237,7 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
 
     // Special case: root drop zone
     if (over === ROOT_DROPZONE_ID) {
-      await operations.moveNode(active, tree.rootId, 0);
+      await operations.moveNode(active, bookmarkTree.rootId, 0);
       setActiveId(null);
       setHoveredFolderId(null);
       setDropHint(null);
@@ -184,7 +254,7 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
       return;
     }
 
-    const overNode = tree.getNode(over);
+    const overNode = await bookmarkTree.getNode(over);
     if (!overNode) {
       setActiveId(null);
       setHoveredFolderId(null);
@@ -198,11 +268,12 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
     if (isFolder(overNode)) {
       // Dropped onto a folder header -> append to that folder
       targetFolderId = overNode.id;
-      targetIndex = tree.requireFolder(targetFolderId).children.length;
+      const targetFolder = await bookmarkTree.requireFolder(targetFolderId);
+      targetIndex = targetFolder.children.length;
     } else {
       // Dropped over an item -> insert before that item in its parent
       targetFolderId = overNode.parentId!;
-      const parent = tree.requireFolder(targetFolderId);
+      const parent = await bookmarkTree.requireFolder(targetFolderId);
       targetIndex = parent.children.indexOf(overNode.id);
     }
 
@@ -216,7 +287,7 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
     ctx: { action: MenuAction; nodeId: string; parentId: string; index: number }
   ) => {
     const { action, nodeId, parentId, index } = ctx;
-    const n = tree.getNode(nodeId);
+    const n = await bookmarkTree.getNode(nodeId);
     if (!n) return;
     
     switch (action) {
@@ -249,69 +320,207 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
     }
   };
 
-  const renderNode = (node: TreeNode, idx: number, parentId: string) => {
-    const index = idx;
-    if (isFolder(node)) {
-      const children = tree.listChildren(node.id);
-      const hovered = hoveredFolderId === node.id;
-      return (
-        <div key={node.id} className={"mb-2 rounded-lg border p-2 " + (hovered ? "bg-accent/30" : "")}>
-          <div className="flex items-center gap-2">
-            <DragHandle />
-            <button
-              className="rounded px-2 py-1 text-left text-sm font-medium hover:bg-accent"
-              onClick={async () => await operations.toggleFolder(node.id)}
-              onKeyDown={async (e) => e.key === "Enter" && await operations.toggleFolder(node.id)}
-              aria-label={node.isOpen ? "Close folder" : "Open folder"}
-              tabIndex={0}
-            >
-              {node.isOpen ? "📂" : "📁"} {node.title}
-              <span className="ml-2 rounded bg-accent px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                {node.orderKey ?? "-"}
-              </span>
-            </button>
-            <div className="grow"></div>
-            <ItemMenu onMenu={(action) => handleMenuAction({ action, nodeId: node.id, parentId, index })} />
-          </div>
+// Folder node component that manages its own children
+const FolderNodeComponent: React.FC<{
+  node: BookmarkTreeNode & { kind: 'folder' };
+  idx: number;
+  parentId: string;
+  bookmarkTree: BookmarkTree;
+  operations: TreeOperations;
+  onMenuAction: (ctx: { action: MenuAction; nodeId: string; parentId: string; index: number }) => void;
+  hoveredFolderId: string | null;
+}> = ({ node, idx, parentId, bookmarkTree, operations, onMenuAction, hoveredFolderId }) => {
+  const [children, setChildren] = React.useState<BookmarkTreeNode[]>([]);
+  const [loadingChildren, setLoadingChildren] = React.useState(false);
 
-          {node.isOpen && (
-            <div className="ml-4 mt-2 flex flex-col gap-1">
-              {children.length === 0 ? (
-                <FolderDropZone folderId={node.id} />
-              ) : (
-                <SortableContext items={children.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-                  {children.map((child, i) => (
-                    <SortableItem key={child.id} id={child.id}>
-                      {renderNode(child, i, node.id)}
-                    </SortableItem>
-                  ))}
-                </SortableContext>
-              )}
-            </div>
-          )}
-        </div>
-      );
+  // Load children when folder is opened
+  React.useEffect(() => {
+    if (node.isOpen) {
+      const loadChildren = async () => {
+        try {
+          setLoadingChildren(true);
+          const nodeChildren = await bookmarkTree.listChildren(node.id);
+          setChildren(nodeChildren);
+        } catch (error) {
+          console.error('Failed to load children for node:', node.id, error);
+        } finally {
+          setLoadingChildren(false);
+        }
+      };
+      loadChildren();
+    } else {
+      setChildren([]);
     }
+  }, [node.isOpen, node.id, bookmarkTree]);
 
-    return (
-      <div key={node.id} className="flex items-center gap-2 rounded border p-2" data-id={node.id}>
-        <DragHandle />
-        <a
-          href={node.kind === "bookmark" ? node.url : "#"}
-          target="_blank"
-          rel="noreferrer"
-          className="truncate text-sm underline"
-          tabIndex={0}
-          aria-label={`Open ${node.title}`}
-        >
-          🔗 {node.title}
-        </a>
-        <span className="rounded bg-accent px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-          {node.orderKey ?? "-"}
-        </span>
-        <div className="grow"></div>
-        <ItemMenu onMenu={(action) => handleMenuAction({ action, nodeId: node.id, parentId, index })} />
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    setActivatorNodeRef,
+  } = useSortable({ id: node.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const dragContext: DragCtx = { attributes, listeners, setActivatorNodeRef };
+  const hovered = hoveredFolderId === node.id;
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <div className={"mb-2 rounded-lg border p-2 " + (hovered ? "bg-accent/30" : "")}>
+        <div className="flex items-center gap-2">
+          <DragHandleContext.Provider value={dragContext}>
+            <DragHandle />
+          </DragHandleContext.Provider>
+          <button
+            className="rounded px-2 py-1 text-left text-sm font-medium hover:bg-accent"
+            onClick={async () => await operations.toggleFolder(node.id)}
+            onKeyDown={async (e) => e.key === "Enter" && await operations.toggleFolder(node.id)}
+            aria-label={node.isOpen ? "Close folder" : "Open folder"}
+            tabIndex={0}
+          >
+            {node.isOpen ? "📂" : "📁"} {node.title}
+            <span className="ml-2 rounded bg-accent px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              {node.orderKey ?? "-"}
+            </span>
+          </button>
+          <div className="grow"></div>
+          <ItemMenu onMenu={(action) => onMenuAction({ action, nodeId: node.id, parentId, index: idx })} />
+        </div>
+
+        {node.isOpen && (
+          <div className="mt-2 ml-4">
+            {loadingChildren ? (
+              <div className="text-sm text-muted-foreground">Loading...</div>
+            ) : children.length > 0 ? (
+              <SortableContext items={children.map((c: BookmarkTreeNode) => c.id)} strategy={verticalListSortingStrategy}>
+                {children.map((child: BookmarkTreeNode, i: number) => (
+                  <TreeNodeRenderer
+                    key={child.id}
+                    node={child}
+                    idx={i}
+                    parentId={node.id}
+                    bookmarkTree={bookmarkTree}
+                    operations={operations}
+                    onMenuAction={onMenuAction}
+                    hoveredFolderId={hoveredFolderId}
+                  />
+                ))}
+              </SortableContext>
+            ) : (
+              <div className="text-sm text-muted-foreground">Empty folder</div>
+            )}
+            <div className="mt-1">
+              <FolderDropZone folderId={node.id} />
+            </div>
+          </div>
+        )}
       </div>
+    </div>
+  );
+};
+
+// Bookmark node component
+const BookmarkNodeComponent: React.FC<{
+  node: BookmarkTreeNode & { kind: 'bookmark' };
+  idx: number;
+  parentId: string;
+  onMenuAction: (ctx: { action: MenuAction; nodeId: string; parentId: string; index: number }) => void;
+}> = ({ node, idx, parentId, onMenuAction }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    setActivatorNodeRef,
+  } = useSortable({ id: node.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const dragContext: DragCtx = { attributes, listeners, setActivatorNodeRef };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <div className="mb-2 rounded-lg border bg-card p-2">
+        <div className="flex items-center gap-2">
+          <DragHandleContext.Provider value={dragContext}>
+            <DragHandle />
+          </DragHandleContext.Provider>
+          <a
+            href={node.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded px-2 py-1 text-left text-sm hover:bg-accent flex-1"
+            tabIndex={0}
+          >
+            🔗 {node.title}
+            <span className="ml-2 rounded bg-accent px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              {node.orderKey ?? "-"}
+            </span>
+            <div className="text-xs text-muted-foreground mt-1 truncate">{node.url}</div>
+          </a>
+          <ItemMenu onMenu={(action) => onMenuAction({ action, nodeId: node.id, parentId, index: idx })} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Main tree node renderer
+const TreeNodeRenderer: React.FC<{
+  node: BookmarkTreeNode;
+  idx: number;
+  parentId: string;
+  bookmarkTree: BookmarkTree;
+  operations: TreeOperations;
+  onMenuAction: (ctx: { action: MenuAction; nodeId: string; parentId: string; index: number }) => void;
+  hoveredFolderId: string | null;
+}> = ({ node, idx, parentId, bookmarkTree, operations, onMenuAction, hoveredFolderId }) => {
+  if (isFolder(node)) {
+    return (
+      <FolderNodeComponent
+        node={node}
+        idx={idx}
+        parentId={parentId}
+        bookmarkTree={bookmarkTree}
+        operations={operations}
+        onMenuAction={onMenuAction}
+        hoveredFolderId={hoveredFolderId}
+      />
+    );
+  } else {
+    return (
+      <BookmarkNodeComponent
+        node={node as BookmarkTreeNode & { kind: 'bookmark' }}
+        idx={idx}
+        parentId={parentId}
+        onMenuAction={onMenuAction}
+      />
+    );
+  }
+};
+
+  const renderNode = (node: BookmarkTreeNode, idx: number, parentId: string) => {
+    return (
+      <TreeNodeRenderer
+        key={node.id}
+        node={node}
+        idx={idx}
+        parentId={parentId}
+        bookmarkTree={bookmarkTree}
+        operations={operations}
+        onMenuAction={handleMenuAction}
+        hoveredFolderId={hoveredFolderId}
+      />
     );
   };
 
@@ -321,8 +530,8 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
         <div className="flex items-center gap-2">
           <div className="text-xl font-semibold">{title}</div>
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="secondary" onClick={() => handleAddFolder(root.id)}>+ Root Folder</Button>
-            <Button onClick={() => handleAddBookmark(root.id)}>+ Root Bookmark</Button>
+            <Button variant="secondary" onClick={() => handleAddFolder(rootNode.id)}>+ Root Folder</Button>
+            <Button onClick={() => handleAddBookmark(rootNode.id)}>+ Root Bookmark</Button>
             {onReset && <Button variant="outline" onClick={onReset}>Reset</Button>}
           </div>
         </div>
@@ -344,7 +553,7 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
               <SortableContext items={rootChildren.map((c) => c.id)} strategy={verticalListSortingStrategy}>
                 {rootChildren.map((child, i) => (
                   <SortableItem key={child.id} id={child.id}>
-                    {renderNode(child, i, root.id)}
+                    {renderNode(child, i, rootNode.id)}
                   </SortableItem>
                 ))}
               </SortableContext>
@@ -361,7 +570,7 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
                     aria-label="Serialized bookmarks tree JSON"
                     tabIndex={0}
                   >
-                    {JSON.stringify(tree.serialize(), null, 2)}
+                    {serializedTree ? JSON.stringify(serializedTree, null, 2) : 'Loading...'}
                   </pre>
                 </div>
               )}
@@ -389,7 +598,7 @@ export const ReusableTreeComponent: React.FC<TreeComponentProps> = ({
           )}
           
           <DragOverlay>
-            {activeId ? <DragPreview node={tree.getNode(activeId)!} hint={dropHint ?? undefined} /> : null}
+            {dragPreviewNode ? <DragPreview node={dragPreviewNode} hint={dropHint ?? undefined} /> : null}
           </DragOverlay>
         </DndContext>
       </div>
@@ -449,7 +658,7 @@ const SortableItem: React.FC<React.PropsWithChildren<{ id: string }>> = ({ id, c
   );
 };
 
-const DragPreview: React.FC<{ node: TreeNode; hint?: string }> = ({ node, hint }) => {
+const DragPreview: React.FC<{ node: BookmarkTreeNode; hint?: string }> = ({ node, hint }) => {
   return (
     <div className="rounded border bg-background px-2 py-1 text-sm">
       <div>{isFolder(node) ? "📁" : "🔗"} {node.title}</div>

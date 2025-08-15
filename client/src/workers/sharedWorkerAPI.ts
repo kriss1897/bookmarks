@@ -3,8 +3,8 @@
  * This defines the contract between the main thread and the SharedWorker
  */
 
-import type { OperationEnvelope } from "@/lib/treeOps";
-import type { TreeNode, NodeId, SerializedTree } from "@/lib/bookmarksTree";
+import type { OperationEnvelope } from "@/lib/builder/treeBuilder";
+import type { BookmarkTreeNode as TreeNode, NodeId, SerializedTree } from "@/lib/tree";
 
 // API Interface that the SharedWorker exposes to tabs
 export interface SharedWorkerAPI {

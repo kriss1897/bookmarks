@@ -3,7 +3,7 @@
  * Implementations can persist to memory, IndexedDB, localStorage, or remote storage.
  */
 
-import type { OperationEnvelope } from './treeOps';
+import type { OperationEnvelope } from './treeBuilder';
 
 // Type definitions to avoid circular dependencies
 interface StoredOperation {

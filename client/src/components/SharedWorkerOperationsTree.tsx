@@ -94,10 +94,17 @@ export const SharedWorkerOperationsTree: React.FC = () => {
     },
     
     moveDown: async (parentId: string, index: number) => {
-      const folder = tree.getNode(parentId);
-      if (!folder || folder.kind !== 'folder') return;
-      if (!folder.children || index >= folder.children.length - 1) return;
-      await reorderNodes({ folderId: parentId, fromIndex: index, toIndex: index + 1 });
+      if (!tree) return;
+      // Since we can't easily access folder children synchronously, 
+      // let's use a different approach by getting folder info async
+      try {
+        const folder = await tree.bookmarkTree.getNode(parentId);
+        if (!folder || folder.kind !== 'folder') return;
+        if (index >= folder.children.length - 1) return;
+        await reorderNodes({ folderId: parentId, fromIndex: index, toIndex: index + 1 });
+      } catch (error) {
+        console.error('Failed to move down:', error);
+      }
     },
     
     moveNode: async (nodeId: string, targetFolderId: string, index?: number) => {
@@ -107,7 +114,7 @@ export const SharedWorkerOperationsTree: React.FC = () => {
 
   // Create state interface
   const state: TreeState = {
-    tree,
+    bookmarkTree: tree.bookmarkTree,
     operations
   };
 

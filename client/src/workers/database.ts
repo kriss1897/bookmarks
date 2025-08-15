@@ -4,8 +4,8 @@
  */
 
 import Dexie, { type Table } from 'dexie';
-import type { TreeNode, NodeId } from '../lib/bookmarksTree';
-import type { OperationEnvelope, TreeOperation } from '../lib/treeOps';
+import type { BookmarkTreeNode as TreeNode, NodeId } from '../lib/tree';
+import type { OperationEnvelope, TreeOperation } from '../lib/builder/treeBuilder';
 
 // Database interfaces
 export interface StoredNode {

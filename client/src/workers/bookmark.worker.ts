@@ -4,10 +4,10 @@
  */
 
 import * as Comlink from 'comlink';
-import { createPersistentTreeBuilder } from '../lib/treeBuilderFactory';
-import type { TreeBuilder } from '../lib/treeBuilderFactory';
+import { createPersistentTreeBuilder } from '../lib/builder/treeBuilderFactory';
+import type { TreeBuilder } from '../lib/builder/treeBuilderFactory';
 import type { SharedWorkerAPI, BroadcastMessage, TabConnection } from './sharedWorkerAPI';
-import type { NodeId, TreeNode } from '../lib/bookmarksTree';
+import type { NodeId, BookmarkTreeNode as TreeNode } from '@/lib/tree';
 
 class BookmarkSharedWorker implements SharedWorkerAPI {
   private builder: TreeBuilder;
@@ -54,13 +54,17 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   }
 
   // Tree Operations
-  async createFolder(params: { parentId?: NodeId; title: string; id?: NodeId; isOpen?: boolean; index?: number }): Promise<NodeId> {
+  async createFolder(params: { parentId?: NodeId; title: string; isOpen?: boolean; id?: NodeId; index?: number }): Promise<NodeId> {
     await this.ensureInitialized();
     
     // Generate ID here if not provided to ensure we can track it
     const nodeId = params.id || this.generateId();
-    const operation = this.builder.createFolder({ ...params, id: nodeId });
-    const node = this.builder.tree.requireNode(nodeId);
+    const operation = await this.builder.dispatch({
+      type: 'create_folder',
+      ...params,
+      id: nodeId
+    });
+    const node = await this.builder.bookmarkTree.requireNode(nodeId);
     
     // PersistentTreeOpsBuilder automatically handles persistence
     console.log('[SharedWorker] Created folder:', operation.op.type);
@@ -79,8 +83,12 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     
     // Generate ID here if not provided to ensure we can track it
     const nodeId = params.id || this.generateId();
-    const operation = this.builder.createBookmark({ ...params, id: nodeId });
-    const node = this.builder.tree.requireNode(nodeId);
+    const operation = await this.builder.dispatch({
+      type: 'create_bookmark',
+      ...params,
+      id: nodeId
+    });
+    const node = await this.builder.bookmarkTree.requireNode(nodeId);
     
     // PersistentTreeOpsBuilder automatically handles persistence
     console.log('[SharedWorker] Created bookmark:', operation.op.type);
@@ -95,7 +103,12 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   }
 
   async removeNode(nodeId: NodeId): Promise<void> {
-    const operation = this.builder.removeNode({ nodeId });
+    await this.ensureInitialized();
+    
+    const operation = await this.builder.dispatch({
+      type: 'remove_node',
+      nodeId
+    });
     
     this.broadcast({
       type: 'node_removed',
@@ -105,10 +118,15 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   }
 
   async moveNode(params: { nodeId: NodeId; toFolderId: NodeId; index?: number }): Promise<void> {
-    const node = this.builder.tree.getNode(params.nodeId);
+    await this.ensureInitialized();
+    
+    const node = await this.builder.bookmarkTree.getNode(params.nodeId);
     const oldParentId = node?.parentId;
     
-    const operation = this.builder.moveNode(params);
+    const operation = await this.builder.dispatch({
+      type: 'move_node',
+      ...params
+    });
     
     if (oldParentId) {
       this.broadcast({
@@ -122,7 +140,12 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   }
 
   async reorderNodes(params: { folderId: NodeId; fromIndex: number; toIndex: number }): Promise<void> {
-    const operation = this.builder.reorder(params);
+    await this.ensureInitialized();
+    
+    const operation = await this.builder.dispatch({
+      type: 'reorder',
+      ...params
+    });
     
     this.broadcast({
       type: 'operation_processed',
@@ -131,8 +154,14 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   }
 
   async toggleFolder(folderId: NodeId, open?: boolean): Promise<void> {
-    const operation = this.builder.toggleFolder({ folderId, open });
-    const node = this.builder.tree.requireNode(folderId);
+    await this.ensureInitialized();
+    
+    const operation = await this.builder.dispatch({
+      type: 'toggle_folder',
+      folderId,
+      open
+    });
+    const node = await this.builder.bookmarkTree.requireNode(folderId);
     
     this.broadcast({
       type: 'node_updated',
@@ -144,15 +173,54 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   // Tree State
   async getTree() {
     await this.ensureInitialized();
-    return this.builder.tree.serialize();
+    // Create a SerializedTree format by collecting all nodes
+    try {
+      const nodes: Record<NodeId, TreeNode> = {};
+      
+      // We need to iterate through all cached nodes
+      // Since we can't access cache directly, let's build it by traversing from root
+      const rootId = this.builder.bookmarkTree.rootId;
+      const visited = new Set<NodeId>();
+      const queue: NodeId[] = [rootId];
+      
+      while (queue.length > 0) {
+        const currentId = queue.shift()!;
+        if (visited.has(currentId)) continue;
+        visited.add(currentId);
+        
+        const node = await this.builder.bookmarkTree.getNode(currentId);
+        if (node) {
+          nodes[currentId] = node;
+          
+          // If it's a folder, add children to queue
+          if (node.kind === 'folder') {
+            const children = await this.builder.bookmarkTree.listChildren(currentId);
+            for (const child of children) {
+              if (!visited.has(child.id)) {
+                queue.push(child.id);
+              }
+            }
+          }
+        }
+      }
+      
+      return { rootId, nodes };
+    } catch (error) {
+      console.error('Failed to serialize tree:', error);
+      // Fallback: return just the root
+      const root = await this.builder.bookmarkTree.getRoot();
+      return { rootId: this.builder.bookmarkTree.rootId, nodes: { [root.id]: root } };
+    }
   }
 
   async getNode(nodeId: NodeId): Promise<TreeNode | null> {
-    return this.builder.tree.getNode(nodeId) || null;
+    await this.ensureInitialized();
+    return await this.builder.bookmarkTree.getNode(nodeId) || null;
   }
 
   async getChildren(folderId: NodeId) {
-    return this.builder.tree.listChildren(folderId);
+    await this.ensureInitialized();
+    return await this.builder.bookmarkTree.listChildren(folderId);
   }
 
   // Operation Log
