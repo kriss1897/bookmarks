@@ -80,8 +80,6 @@ export function useSharedWorkerBookmarks() {
 
   // Load initial tree when connected
   useMemo(() => {
-    console.log(JSON.stringify({ isConnected, tree, loading, refreshTree }));
-
     if (isConnected && !tree && !loading) {
       refreshTree();
     }

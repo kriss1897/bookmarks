@@ -41,61 +41,61 @@ Multiple tabs on the same device stay in sync using SharedWorker with IndexedDB 
 
 ### Tasks & Status:
 
-#### [ ] 4. SharedWorker Foundation & Comlink Setup
-- [ ] Set up Vite configuration for SharedWorker
-- [ ] Install and configure Comlink
-- [ ] Create basic SharedWorker entry point
-- [ ] Wrap SharedWorker with Comlink for RPC
-- [ ] Define API interface for worker communication
-- [ ] Implement tab connection handling
-- [ ] Add connection lifecycle management (connect/disconnect)
-- [ ] Implement type-safe method exposure
-- [ ] Test SharedWorker initialization across tabs
-- [ ] Test bidirectional communication
+#### [x] 4. SharedWorker Foundation & Comlink Setup
+- [x] Set up Vite configuration for SharedWorker
+- [x] Install and configure Comlink
+- [x] Create basic SharedWorker entry point
+- [x] Wrap SharedWorker with Comlink for RPC
+- [x] Define API interface for worker communication
+- [x] Implement tab connection handling
+- [x] Add connection lifecycle management (connect/disconnect)
+- [x] Implement type-safe method exposure
+- [x] Test SharedWorker initialization across tabs
+- [x] Test bidirectional communication
 
-#### [ ] 5. Dexie Database Setup in Worker
-- [ ] Install and configure Dexie
-- [ ] Define schema for separate node storage (`nodes` table)
-- [ ] Define schema for `operationLog` table
-- [ ] Initialize database with versioning in SharedWorker
-- [ ] Implement database upgrade/migration logic
+#### [x] 5. Dexie Database Setup in Worker
+- [x] Install and configure Dexie
+- [x] Define schema for separate node storage (`nodes` table)
+- [x] Define schema for `operationLog` table
+- [x] Initialize database with versioning in SharedWorker
+- [x] Implement database upgrade/migration logic
 
-#### [ ] 6. Node-Based Persistence Service
-- [ ] Implement `saveNode()` method for individual bookmark/folder
-- [ ] Implement `loadNodes()` method for tree reconstruction
-- [ ] Implement `appendOperation()` method for operation log
-- [ ] Implement `loadOperationLog()` method for replay
-- [ ] Add transaction support for multi-node operations
-- [ ] Add error handling for database operations
+#### [x] 6. Node-Based Persistence Service
+- [x] Implement `saveNode()` method for individual bookmark/folder
+- [x] Implement `loadNodes()` method for tree reconstruction
+- [x] Implement `appendOperation()` method for operation log
+- [x] Implement `loadOperationLog()` method for replay
+- [x] Add transaction support for multi-node operations
+- [x] Add error handling for database operations
 
-#### [ ] 7. SharedWorker CRUD API
-- [ ] Move tree operations to SharedWorker
-- [ ] Expose bookmark CRUD methods via Comlink
-- [ ] Implement folder operations in worker
-- [ ] Add operation validation in worker
-- [ ] Integrate with node-based persistence
-- [ ] Test API functionality from multiple tabs
+#### [x] 7. SharedWorker CRUD API
+- [x] Move tree operations to SharedWorker
+- [x] Expose bookmark CRUD methods via Comlink
+- [x] Implement folder operations in worker
+- [x] Add operation validation in worker
+- [x] Integrate with node-based persistence
+- [x] Test API functionality from multiple tabs
 
-#### [ ] 8. Broadcast Channel Implementation
-- [ ] Set up Broadcast Channel for tab notifications
-- [ ] Define message types for node updates
-- [ ] Implement change broadcasting from worker
-- [ ] Add tab-side message listeners
-- [ ] Test real-time updates across tabs
+#### [x] 8. Broadcast Channel Implementation
+- [x] Set up Broadcast Channel for tab notifications
+- [x] Define message types for node updates
+- [x] Implement change broadcasting from worker
+- [x] Add tab-side message listeners
+- [x] Test real-time updates across tabs
 
-#### [ ] 9. React Hook Integration
-- [ ] Create `useSharedWorkerBookmarks` hook
-- [ ] Implement worker connection management
-- [ ] Add automatic re-connection on worker failure
-- [ ] Handle loading and error states
-- [ ] Test hook across different components
+#### [x] 9. React Hook Integration
+- [x] Create `useSharedWorkerBookmarks` hook
+- [x] Implement worker connection management
+- [x] Add automatic re-connection on worker failure
+- [x] Handle loading and error states
+- [x] Test hook across different components
 
-#### [ ] 10. Tree Recovery & Replay Logic
-- [ ] Implement app startup tree reconstruction from nodes
-- [ ] Add operation log replay using `TreeOpsBuilder.replay()`
-- [ ] Handle corrupted data scenarios
-- [ ] Add data validation on load
-- [ ] Test persistence across worker restarts
+#### [x] 10. Tree Recovery & Replay Logic
+- [x] Implement app startup tree reconstruction from nodes
+- [x] Add operation log replay using `TreeOpsBuilder.replay()`
+- [x] Handle corrupted data scenarios
+- [x] Add data validation on load
+- [x] Test persistence across worker restarts
 
 #### [ ] 11. Multi-Tab Demo with Persistence
 - [ ] Update UI components to use SharedWorker API

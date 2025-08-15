@@ -5,6 +5,7 @@
 
 import * as Comlink from 'comlink';
 import { TreeOpsBuilder } from '../lib/treeOps';
+import { databaseService } from './database';
 import type { SharedWorkerAPI, BroadcastMessage, TabConnection } from './sharedWorkerAPI';
 import type { NodeId, TreeNode } from '../lib/bookmarksTree';
 
@@ -12,9 +13,52 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   private builder = new TreeOpsBuilder();
   private connections = new Map<string, TabConnection>();
   private broadcastChannel = new BroadcastChannel('bookmarks-sync');
+  private isInitialized = false;
 
   constructor() {
     console.log('[SharedWorker] BookmarkSharedWorker initialized');
+    this.initializeFromDatabase();
+  }
+
+  // Initialize tree from persisted data
+  private async initializeFromDatabase(): Promise<void> {
+    try {
+      console.log('[SharedWorker] Loading tree from database...');
+      
+      // Load stored operations and replay them to reconstruct tree
+      const storedOperations = await databaseService.loadOperationLog();
+      console.log(`[SharedWorker] Loaded ${storedOperations.length} operations from database`);
+      
+      if (storedOperations.length > 0) {
+        // Convert stored operations back to OperationEnvelope format
+        const operationEnvelopes = storedOperations.map(stored => ({
+          id: stored.id,
+          ts: stored.ts,
+          op: stored.op
+        }));
+        
+        // Create builder and replay operations
+        this.builder = new TreeOpsBuilder();
+        this.builder.replay(operationEnvelopes, { record: true });
+        console.log('[SharedWorker] Tree reconstructed from operation log');
+      } else {
+        console.log('[SharedWorker] No stored operations, starting with empty tree');
+        this.builder = new TreeOpsBuilder();
+      }
+      
+      this.isInitialized = true;
+    } catch (error) {
+      console.error('[SharedWorker] Failed to initialize from database:', error);
+      this.builder = new TreeOpsBuilder(); // Fallback to empty tree
+      this.isInitialized = true;
+    }
+  }
+
+  // Wait for initialization to complete
+  private async ensureInitialized(): Promise<void> {
+    while (!this.isInitialized) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
   }
 
   // Connection Management
@@ -39,10 +83,20 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
   // Tree Operations
   async createFolder(params: { parentId?: NodeId; title: string; id?: NodeId; isOpen?: boolean; index?: number }): Promise<NodeId> {
+    await this.ensureInitialized();
+    
     // Generate ID here if not provided to ensure we can track it
     const nodeId = params.id || this.generateId();
     const operation = this.builder.createFolder({ ...params, id: nodeId });
     const node = this.builder.tree.requireNode(nodeId);
+    
+    // Persist operation to database
+    try {
+      await databaseService.appendOperation(operation);
+      console.log('[SharedWorker] Operation persisted:', operation.op.type);
+    } catch (error) {
+      console.error('[SharedWorker] Failed to persist operation:', error);
+    }
     
     this.broadcast({
       type: 'node_created',
@@ -54,10 +108,20 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   }
 
   async createBookmark(params: { parentId?: NodeId; title: string; url: string; id?: NodeId; index?: number }): Promise<NodeId> {
+    await this.ensureInitialized();
+    
     // Generate ID here if not provided to ensure we can track it
     const nodeId = params.id || this.generateId();
     const operation = this.builder.createBookmark({ ...params, id: nodeId });
     const node = this.builder.tree.requireNode(nodeId);
+    
+    // Persist operation to database
+    try {
+      await databaseService.appendOperation(operation);
+      console.log('[SharedWorker] Operation persisted:', operation.op.type);
+    } catch (error) {
+      console.error('[SharedWorker] Failed to persist operation:', error);
+    }
     
     this.broadcast({
       type: 'node_created',
@@ -117,6 +181,7 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
   // Tree State
   async getTree() {
+    await this.ensureInitialized();
     return this.builder.tree.serialize();
   }
 
