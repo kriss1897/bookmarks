@@ -1,0 +1,48 @@
+/**
+ * SharedWorker API interface for bookmark synchronization
+ * This defines the contract between the main thread and the SharedWorker
+ */
+
+import type { OperationEnvelope } from "@/lib/treeOps";
+import type { TreeNode, NodeId, SerializedTree } from "@/lib/bookmarksTree";
+
+// API Interface that the SharedWorker exposes to tabs
+export interface SharedWorkerAPI {
+  // Tree Operations
+  createFolder(params: { parentId?: NodeId; title: string; id?: NodeId; isOpen?: boolean; index?: number }): Promise<NodeId>;
+  createBookmark(params: { parentId?: NodeId; title: string; url: string; id?: NodeId; index?: number }): Promise<NodeId>;
+  removeNode(nodeId: NodeId): Promise<void>;
+  moveNode(params: { nodeId: NodeId; toFolderId: NodeId; index?: number }): Promise<void>;
+  reorderNodes(params: { folderId: NodeId; fromIndex: number; toIndex: number }): Promise<void>;
+  toggleFolder(folderId: NodeId, open?: boolean): Promise<void>;
+
+  // Tree State
+  getTree(): Promise<SerializedTree>;
+  getNode(nodeId: NodeId): Promise<TreeNode | null>;
+  getChildren(folderId: NodeId): Promise<TreeNode[]>;
+
+  // Operation Log
+  getOperationLog(): Promise<OperationEnvelope[]>;
+  appendOperation(operation: OperationEnvelope): Promise<void>;
+
+  // Connection Management
+  connect(tabId: string): Promise<void>;
+  disconnect(tabId: string): Promise<void>;
+  ping(): Promise<string>;
+}
+
+// Message types for broadcast communication between tabs
+export type BroadcastMessage = 
+  | { type: 'node_created'; node: TreeNode; operation: OperationEnvelope }
+  | { type: 'node_updated'; node: TreeNode; operation: OperationEnvelope }
+  | { type: 'node_removed'; nodeId: NodeId; operation: OperationEnvelope }
+  | { type: 'node_moved'; nodeId: NodeId; oldParentId: NodeId; newParentId: NodeId; operation: OperationEnvelope }
+  | { type: 'tree_reloaded'; tree: SerializedTree }
+  | { type: 'operation_processed'; operation: OperationEnvelope };
+
+// Connection info for tab management
+export interface TabConnection {
+  id: string;
+  connectedAt: number;
+  lastPing: number;
+}

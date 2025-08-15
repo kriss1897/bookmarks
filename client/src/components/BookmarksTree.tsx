@@ -295,7 +295,7 @@ export const BookmarksTree: React.FC = () => {
   };
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
+    <div>
       <div className="flex w-full max-w-2xl flex-col gap-3 p-4">
         <div className="flex items-center gap-2">
           <div className="text-xl font-semibold">Bookmarks Demo (Ops-driven)</div>
@@ -305,55 +305,58 @@ export const BookmarksTree: React.FC = () => {
             <Button variant="outline" onClick={handleReset}>Reset</Button>
           </div>
         </div>
-        <div className="text-xs text-muted-foreground">Drag and drop enabled (nested). Ordering uses fractional keys.</div>
-        <RootDropZone />
-        <div className="mt-2 space-y-2">
-          {rootChildren.length === 0 ? (
-            <div className="rounded border p-4 text-sm text-muted-foreground">No items yet. Use the buttons above to add some.</div>
-          ) : (
-            <SortableContext items={rootChildren.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-              {rootChildren.map((child, i) => (
-                <SortableItem key={child.id} id={child.id}>
-                  {renderNode(child, i, root.id)}
-                </SortableItem>
-              ))}
-            </SortableContext>
-          )}
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div>
-            <div className="mb-1 text-xs font-medium text-muted-foreground">Serialized tree (JSON)</div>
-            <pre
-              className="max-h-64 overflow-auto rounded-md border bg-accent/20 p-3 font-mono text-[11px] leading-tight"
-              aria-label="Serialized bookmarks tree JSON"
-              tabIndex={0}
-            >
-              {JSON.stringify(tree.serialize(), null, 2)}
-            </pre>
+        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
+          <div className="text-xs text-muted-foreground">Drag and drop enabled (nested). Ordering uses fractional keys.</div>
+          <RootDropZone />
+          <div className="mt-2 space-y-2">
+            {rootChildren.length === 0 ? (
+              <div className="rounded border p-4 text-sm text-muted-foreground">No items yet. Use the buttons above to add some.</div>
+            ) : (
+              <SortableContext items={rootChildren.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+                {rootChildren.map((child, i) => (
+                  <SortableItem key={child.id} id={child.id}>
+                    {renderNode(child, i, root.id)}
+                  </SortableItem>
+                ))}
+              </SortableContext>
+            )}
           </div>
-          <div>
-            <div className="mb-1 text-xs font-medium text-muted-foreground">Operations log</div>
-            <div className="max-h-64 overflow-auto rounded-md border bg-accent/10 p-2">
-              {ops.length === 0 ? (
-                <div className="p-2 text-xs text-muted-foreground">No operations yet.</div>
-              ) : (
-                <ol className="space-y-1 text-xs">
-                  {ops.map((env, i) => (
-                    <li key={env.id} className="rounded bg-background p-1">
-                      <span className="mr-2 inline-block w-5 text-right text-muted-foreground">{i + 1}.</span>
-                      <code className="font-mono">{formatOp(env)}</code>
-                    </li>
-                  ))}
-                </ol>
-              )}
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs font-medium text-muted-foreground">Serialized tree (JSON)</div>
+              <pre
+                className="max-h-64 overflow-auto rounded-md border bg-accent/20 p-3 font-mono text-[11px] leading-tight"
+                aria-label="Serialized bookmarks tree JSON"
+                tabIndex={0}
+              >
+                {JSON.stringify(tree.serialize(), null, 2)}
+              </pre>
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-medium text-muted-foreground">Operations log</div>
+              <div className="max-h-64 overflow-auto rounded-md border bg-accent/10 p-2">
+                {ops.length === 0 ? (
+                  <div className="p-2 text-xs text-muted-foreground">No operations yet.</div>
+                ) : (
+                  <ol className="space-y-1 text-xs">
+                    {ops.map((env, i) => (
+                      <li key={env.id} className="rounded bg-background p-1">
+                        <span className="mr-2 inline-block w-5 text-right text-muted-foreground">{i + 1}.</span>
+                        <code className="font-mono">{formatOp(env)}</code>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+          <DragOverlay>
+            {activeId ? <DragPreview node={tree.getNode(activeId)!} hint={dropHint ?? undefined} /> : null}
+          </DragOverlay>
+        </DndContext>
       </div>
-      <DragOverlay>
-        {activeId ? <DragPreview node={tree.getNode(activeId)!} hint={dropHint ?? undefined} /> : null}
-      </DragOverlay>
-    </DndContext>
+    </div>
+
   );
 };
 
