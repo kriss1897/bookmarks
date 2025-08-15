@@ -143,9 +143,13 @@ export class DatabaseService {
   }
 
   async loadOperationLog(): Promise<StoredOperation[]> {
-    return await this.db.operationLog
+    const operations = await this.db.operationLog
       .orderBy('ts')
       .toArray();
+    
+    console.log('[Database] Loaded', operations.length, 'operations from database');
+    
+    return operations;
   }
 
   async getOperationsSince(timestamp: number): Promise<StoredOperation[]> {

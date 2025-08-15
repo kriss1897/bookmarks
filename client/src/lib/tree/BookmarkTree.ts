@@ -28,6 +28,7 @@ export type BookmarkTreeNode = BookmarkNode | FolderNode;
 
 export interface BookmarkTreeConfig extends TreeConfig<BookmarkTreeNode> {
   rootTitle?: string;
+  rootId?: string;
 }
 
 /** Type guards */
@@ -53,6 +54,11 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
       isOpen: true,
       children: []
     };
+    
+    // Add ID if specified in config
+    if (config.rootId) {
+      rootNodeData.id = config.rootId;
+    }
     
     return super.initialize(rootNodeData);
   }

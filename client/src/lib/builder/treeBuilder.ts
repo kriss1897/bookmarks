@@ -103,6 +103,8 @@ export class TreeBuilder {
       enableEvents: false
     });
 
+    console.log('>> Bookmark Tree', this.bookmarkTree)
+
     // Handle legacy tree data migration if provided
     if (config.tree && !shouldAutoLoad) {
       console.log('[TreeBuilder] Legacy tree data provided, will initialize after setup');
@@ -136,7 +138,8 @@ export class TreeBuilder {
     
     try {
       await this.bookmarkTree.initializeBookmarkTree({
-        rootTitle: this.rootNodeConfig.title || 'Bookmarks'
+        rootTitle: this.rootNodeConfig.title || 'Bookmarks',
+        rootId: this.rootNodeConfig.id || 'root'
       });
       
       this.treeInitialized = true;
@@ -185,23 +188,23 @@ export class TreeBuilder {
         
         // Create root folder operation and persist it to storage
         // This ensures the root node creation is stored as the first operation
-        const rootOperation: OperationEnvelope = {
-          id: this.generateOpId(),
-          ts: Date.now(),
-          op: {
-            type: 'create_folder' as const,
-            id: this.rootNodeConfig.id || 'root',
-            title: this.rootNodeConfig.title || 'Bookmarks',
-            isOpen: this.rootNodeConfig.isOpen ?? true,
-            parentId: undefined,
-            index: undefined
-          }
-        };
+        // const rootOperation: OperationEnvelope = {
+        //   id: this.generateOpId(),
+        //   ts: Date.now(),
+        //   op: {
+        //     type: 'create_folder' as const,
+        //     id: this.rootNodeConfig.id || 'root',
+        //     title: this.rootNodeConfig.title || 'Bookmarks',
+        //     isOpen: this.rootNodeConfig.isOpen ?? true,
+        //     parentId: undefined,
+        //     index: undefined
+        //   }
+        // };
         
         // Manually persist this operation and add to log
-        await this.storage.persistOperation(rootOperation);
-        this.log.push(rootOperation);
-        console.log('[TreeBuilder] Root operation created and persisted:', rootOperation.id);
+        // await this.storage.persistOperation(rootOperation);
+        // this.log.push(rootOperation);
+        // console.log('[TreeBuilder] Root operation created and persisted:', rootOperation.id);
       }
       
       this.isInitialized = true;
@@ -237,6 +240,13 @@ export class TreeBuilder {
   async apply(env: OperationEnvelope, opts?: { record?: boolean }): Promise<void> {
     await this.applyOperation(env.op);
     if (opts?.record) this.log.push(env);
+  }
+
+  /** Apply an operation envelope and persist it to storage. Used for external operations that need to be integrated. */
+  async applyAndPersist(env: OperationEnvelope): Promise<void> {
+    await this.applyOperation(env.op);
+    this.log.push(env);
+    await this.storage.persistOperation(env);
   }
 
   /** Apply a list of operations in order. Useful for rebuilding a tree from a log. */

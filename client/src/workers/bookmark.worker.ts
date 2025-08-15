@@ -6,6 +6,7 @@
 import * as Comlink from 'comlink';
 import { createPersistentTreeBuilder } from '../lib/builder/treeBuilderFactory';
 import type { TreeBuilder } from '../lib/builder/treeBuilderFactory';
+import type { CreateFolderOp, CreateBookmarkOp } from '../lib/builder/treeBuilder';
 import type { SharedWorkerAPI, BroadcastMessage, TabConnection } from './sharedWorkerAPI';
 import type { NodeId, BookmarkTreeNode as TreeNode } from '@/lib/tree';
 
@@ -59,15 +60,21 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     
     // Generate ID here if not provided to ensure we can track it
     const nodeId = params.id || this.generateId();
-    const operation = await this.builder.dispatch({
+    
+    // Create operation with explicit properties to ensure nodeId is included
+    const createFolderOp: CreateFolderOp = {
       type: 'create_folder',
-      ...params,
-      id: nodeId
-    });
+      id: nodeId,
+      parentId: params.parentId,
+      title: params.title,
+      isOpen: params.isOpen,
+      index: params.index
+    };
+    
+    const operation = await this.builder.dispatch(createFolderOp);
     const node = await this.builder.bookmarkTree.requireNode(nodeId);
     
-    // PersistentTreeOpsBuilder automatically handles persistence
-    console.log('[SharedWorker] Created folder:', operation.op.type);
+    console.log('[SharedWorker] Created folder:', params.title, 'with nodeId:', nodeId);
     
     this.broadcast({
       type: 'node_created',
@@ -83,15 +90,21 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     
     // Generate ID here if not provided to ensure we can track it
     const nodeId = params.id || this.generateId();
-    const operation = await this.builder.dispatch({
+    
+    // Create operation with explicit properties to ensure nodeId is included
+    const createBookmarkOp: CreateBookmarkOp = {
       type: 'create_bookmark',
-      ...params,
-      id: nodeId
-    });
+      id: nodeId,
+      parentId: params.parentId,
+      title: params.title,
+      url: params.url,
+      index: params.index
+    };
+    
+    const operation = await this.builder.dispatch(createBookmarkOp);
     const node = await this.builder.bookmarkTree.requireNode(nodeId);
     
-    // PersistentTreeOpsBuilder automatically handles persistence
-    console.log('[SharedWorker] Created bookmark:', operation.op.type);
+    console.log('[SharedWorker] Created bookmark:', params.title, 'with nodeId:', nodeId);
     
     this.broadcast({
       type: 'node_created',
@@ -236,15 +249,19 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   }
 
   async appendOperation(operation: Parameters<SharedWorkerAPI['appendOperation']>[0]) {
-    console.log('[SharedWorker] Appending operation:', operation.id, operation.op);
+    console.log('[SharedWorker] Appending operation (system/sync use only):', operation.id, operation.op);
     
     try {
       // Ensure we're initialized
       await this.ensureInitialized();
       
-      // Apply operation to builder (PersistentTreeOpsBuilder handles persistence automatically)
-      this.builder.apply(operation);
-      console.log('[SharedWorker] Operation applied to builder');
+      // NOTE: This method should only be used for system operations (sync, replay, etc.)
+      // User-initiated operations should use the specific methods (createFolder, createBookmark, etc.)
+      // which ensure proper node ID generation and validation
+      
+      // Use the builder's applyAndPersist method - let the builder handle persistence
+      await this.builder.applyAndPersist(operation);
+      console.log('[SharedWorker] Operation applied and persisted by builder');
       
       // Broadcast to all tabs (including the originating tab)
       this.broadcast({
