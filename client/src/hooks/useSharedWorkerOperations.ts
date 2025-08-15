@@ -104,122 +104,53 @@ export function useSharedWorkerOperations() {
     }
   }, [isConnected, operationsLoaded, loadOperations]);
 
+  // Helper function to wrap API calls with consistent error handling
+  const withWorkerCheck = useCallback(async <T>(
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T | undefined> => {
+    if (!isConnected || !workerProxy) {
+      console.warn(`SharedWorker not connected, cannot ${operationName}`);
+      return;
+    }
+
+    try {
+      console.log(`Executing ${operationName} via SharedWorker`);
+      const result = await operation();
+      console.log(`${operationName} completed successfully`);
+      return result;
+    } catch (error) {
+      console.error(`Failed to ${operationName}:`, error);
+      throw error;
+    }
+  }, [isConnected, workerProxy]);
+
   // Tree operation methods - call SharedWorker methods directly
   const createFolder = useCallback(async (params: { parentId?: string; title: string; isOpen?: boolean; index?: number }) => {
-    if (!isConnected || !workerProxy) {
-      console.warn('SharedWorker not connected, cannot create folder');
-      return;
-    }
-    
-    const actualParams = {
-      ...params,
-      parentId: params.parentId || 'root' // Use 'root' as default since we don't have builder here
-    };
-    
-    console.log('Creating folder via SharedWorker API:', actualParams);
-    
-    try {
-      // Call SharedWorker's createFolder method directly
-      const nodeId = await api.createFolder(actualParams);
-      console.log('Folder created with nodeId:', nodeId);
-      return nodeId;
-    } catch (error) {
-      console.error('Failed to create folder:', error);
-      throw error;
-    }
-  }, [api, isConnected, workerProxy]);
+    const actualParams = { ...params, parentId: params.parentId || 'root' };
+    return withWorkerCheck(() => api.createFolder(actualParams), 'createFolder');
+  }, [withWorkerCheck, api]);
 
   const createBookmark = useCallback(async (params: { parentId?: string; title: string; url: string; index?: number }) => {
-    if (!isConnected || !workerProxy) {
-      console.warn('SharedWorker not connected, cannot create bookmark');
-      return;
-    }
-    
-    const actualParams = {
-      ...params,
-      parentId: params.parentId || 'root' // Use 'root' as default
-    };
-    
-    console.log('Creating bookmark via SharedWorker API:', actualParams);
-    
-    try {
-      // Call SharedWorker's createBookmark method directly
-      const nodeId = await api.createBookmark(actualParams);
-      console.log('Bookmark created with nodeId:', nodeId);
-      return nodeId;
-    } catch (error) {
-      console.error('Failed to create bookmark:', error);
-      throw error;
-    }
-  }, [api, isConnected, workerProxy]);
+    const actualParams = { ...params, parentId: params.parentId || 'root' };
+    return withWorkerCheck(() => api.createBookmark(actualParams), 'createBookmark');
+  }, [withWorkerCheck, api]);
 
   const removeNode = useCallback(async (nodeId: string) => {
-    if (!isConnected || !workerProxy) {
-      console.warn('SharedWorker not connected, cannot remove node');
-      return;
-    }
-    
-    console.log('Removing node via SharedWorker API:', nodeId);
-    
-    try {
-      await api.removeNode(nodeId);
-      console.log('Node removed:', nodeId);
-    } catch (error) {
-      console.error('Failed to remove node:', error);
-      throw error;
-    }
-  }, [api, isConnected, workerProxy]);
+    return withWorkerCheck(() => api.removeNode(nodeId), 'removeNode');
+  }, [withWorkerCheck, api]);
 
   const moveNode = useCallback(async (params: { nodeId: string; toFolderId: string; index?: number }) => {
-    if (!isConnected || !workerProxy) {
-      console.warn('SharedWorker not connected, cannot move node');
-      return;
-    }
-    
-    console.log('Moving node via SharedWorker API:', params);
-    
-    try {
-      await api.moveNode(params);
-      console.log('Node moved:', params.nodeId);
-    } catch (error) {
-      console.error('Failed to move node:', error);
-      throw error;
-    }
-  }, [api, isConnected, workerProxy]);
-
-  const reorderNodes = useCallback(async (params: { folderId: string; fromIndex: number; toIndex: number }) => {
-    if (!isConnected || !workerProxy) {
-      console.warn('SharedWorker not connected, cannot reorder nodes');
-      return;
-    }
-    
-    console.log('Reordering nodes via SharedWorker API:', params);
-    
-    try {
-      await api.reorderNodes(params);
-      console.log('Nodes reordered in folder:', params.folderId);
-    } catch (error) {
-      console.error('Failed to reorder nodes:', error);
-      throw error;
-    }
-  }, [api, isConnected, workerProxy]);
+    return withWorkerCheck(() => api.moveNode(params), 'moveNode');
+  }, [withWorkerCheck, api]);
 
   const toggleFolder = useCallback(async (folderId: string, open?: boolean) => {
-    if (!isConnected || !workerProxy) {
-      console.warn('SharedWorker not connected, cannot toggle folder');
-      return;
-    }
-    
-    console.log('Toggling folder via SharedWorker API:', folderId, open);
-    
-    try {
-      await api.toggleFolder(folderId, open);
-      console.log('Folder toggled:', folderId);
-    } catch (error) {
-      console.error('Failed to toggle folder:', error);
-      throw error;
-    }
-  }, [api, isConnected, workerProxy]);
+    return withWorkerCheck(() => api.toggleFolder(folderId, open), 'toggleFolder');
+  }, [withWorkerCheck, api]);
+
+  const reorderNodes = useCallback(async (params: { folderId: string; fromIndex: number; toIndex: number }) => {
+    return withWorkerCheck(() => api.reorderNodes(params), 'reorderNodes');
+  }, [withWorkerCheck, api]);
 
   const getOperationLog = useCallback(async (): Promise<OperationEnvelope[]> => {
     return await api.getOperationLog();
