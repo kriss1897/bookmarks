@@ -60,6 +60,8 @@ export interface OperationEnvelope {
   id: string; // op id (uuid)
   ts: number; // epoch ms
   op: TreeOperation;
+  remote?: boolean; // indicates this operation came from server/remote source
+  processed?: boolean; // indicates this operation was already processed by server
 }
 
 export interface TreeBuilderConfig {
