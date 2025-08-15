@@ -7,6 +7,7 @@ import React from "react";
 import { useSharedWorkerOperations } from "@/hooks/useSharedWorkerOperations";
 import { ReusableTreeComponent, type TreeOperations, type TreeState } from "./ReusableTreeComponent";
 import { Button } from "./ui/button";
+import type { BookmarkTreeNode } from '@/lib/tree/BookmarkTree';
 
 export const SharedWorkerOperationsTree: React.FC = () => {
   const {
@@ -25,6 +26,55 @@ export const SharedWorkerOperationsTree: React.FC = () => {
     reconnect,
     reload
   } = useSharedWorkerOperations();
+
+  const [serializedTree, setSerializedTree] = React.useState<Record<string, BookmarkTreeNode>>({});
+
+  // Serialize the tree whenever it changes
+  React.useEffect(() => {
+    if (!tree?.bookmarkTree) return;
+
+    const serializeTree = async () => {
+      try {
+        const nodes: Record<string, BookmarkTreeNode> = {};
+        
+        const addNodeRecursively = async (nodeId: string) => {
+          const node = await tree.bookmarkTree.getNode(nodeId);
+          if (node) {
+            if (node.kind === 'folder') {
+              // Get sorted children and update the node's children array
+              const sortedChildren = await tree.bookmarkTree.listChildren(node.id);
+              const nodeWithSortedChildren = {
+                ...node,
+                children: sortedChildren.map(child => child.id)
+              };
+              nodes[node.id] = nodeWithSortedChildren;
+              
+              // Recursively add children
+              for (const child of sortedChildren) {
+                await addNodeRecursively(child.id);
+              }
+            } else {
+              nodes[node.id] = node;
+            }
+          }
+        };
+
+        await addNodeRecursively(tree.bookmarkTree.rootId);
+        setSerializedTree(nodes);
+      } catch (error) {
+        console.error('Error serializing tree:', error);
+      }
+    };
+
+    serializeTree();
+  }, [tree?.bookmarkTree, operations.length]); // Use operations.length instead of operations array
+
+  // Create state interface - memoize to prevent unnecessary re-renders
+  const state: TreeState = React.useMemo(() => ({
+    nodes: serializedTree,
+    rootId: tree?.bookmarkTree?.rootId || 'root',
+    operations
+  }), [serializedTree, tree?.bookmarkTree?.rootId, operations]);
 
   if (loading) {
     return (
@@ -67,16 +117,17 @@ export const SharedWorkerOperationsTree: React.FC = () => {
 
   // Adapt TreeOpsBuilder-style operations to TreeOperations interface
   const treeOperations: TreeOperations = {
-    createFolder: async (parentId: string, title = "New Folder") => {
-      await createFolder({ parentId, title, isOpen: true });
+    createFolder: async (parentId: string, title = "New Folder", index?: number) => {
+      await createFolder({ parentId, title, isOpen: true, index });
     },
     
-    createBookmark: async (parentId: string, title?: string, url?: string) => {
+    createBookmark: async (parentId: string, title?: string, url?: string, index?: number) => {
       const n = Math.floor(Math.random() * 1000);
       await createBookmark({ 
         parentId, 
         title: title || `Link ${n}`, 
-        url: url || `https://example.com/${n}` 
+        url: url || `https://example.com/${n}`,
+        index
       });
     },
     
@@ -110,12 +161,6 @@ export const SharedWorkerOperationsTree: React.FC = () => {
     moveNode: async (nodeId: string, targetFolderId: string, index?: number) => {
       await moveNode({ nodeId, toFolderId: targetFolderId, index });
     }
-  };
-
-  // Create state interface
-  const state: TreeState = {
-    bookmarkTree: tree.bookmarkTree,
-    operations
   };
 
   return (

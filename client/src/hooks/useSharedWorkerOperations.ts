@@ -63,27 +63,41 @@ export function useSharedWorkerOperations() {
 
   // Handle broadcast messages for real-time operation sync
   const handleMessage = useCallback(async (message: BroadcastMessage) => {
-    console.log('Received operation broadcast:', message.type);
+    console.log('[Client] Received broadcast message:', message.type, message);
+    
+    if (!builder) {
+      console.warn('[Client] No builder available, cannot apply broadcast operation');
+      return;
+    }
     
     switch (message.type) {
       case 'operation_processed':
         // Apply ALL operations (local and remote) when received from broadcast
-        if (message.operation && builder) {
+        if (message.operation) {
           try {
-            console.log('Applying operation from broadcast:', message.operation.id);
+            console.log('[Client] Applying operation from broadcast:', message.operation.id, message.operation.op);
+            console.log('[Client] Builder log length before:', builder.log.length);
             await builder.apply(message.operation, { record: true });
+            console.log('[Client] Builder log length after:', builder.log.length);
+            console.log('[Client] Operation applied successfully, forcing update');
             forceUpdate();
           } catch (err) {
-            console.error('Failed to apply broadcasted operation:', message.operation, err);
+            console.error('[Client] Failed to apply broadcasted operation:', message.operation, err);
             // If we can't apply the operation, reload all operations
+            console.log('[Client] Reloading all operations due to error');
             loadOperations();
           }
+        } else {
+          console.warn('[Client] Received operation_processed message without operation');
         }
         break;
       case 'tree_reloaded':
         // Reload all operations if tree was reloaded
+        console.log('[Client] Tree reloaded, reloading operations');
         loadOperations();
         break;
+      default:
+        console.log('[Client] Unhandled broadcast message type:', message.type);
     }
   }, [builder, forceUpdate, loadOperations]);
 
@@ -159,13 +173,16 @@ export function useSharedWorkerOperations() {
   return {
     // Tree state - now just the BookmarkTree directly
     tree: builder ? { bookmarkTree: builder.bookmarkTree } : null,
-    operations: builder?.log || [],
+    operations: builder?.log ? [...builder.log] : [], // Create new array reference for React to detect changes
     
     // Connection state
     loading,
     error,
     connected: isConnected,
     operationsLoaded,
+    
+    // Debug info
+    lastUpdate: Date.now(), // Add timestamp to help track updates
 
     // Connection management
     reconnect,

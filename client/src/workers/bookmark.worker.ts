@@ -72,13 +72,12 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     };
     
     const operation = await this.builder.dispatch(createFolderOp);
-    const node = await this.builder.bookmarkTree.requireNode(nodeId);
     
     console.log('[SharedWorker] Created folder:', params.title, 'with nodeId:', nodeId);
     
+    // Broadcast operation_processed so clients can apply the operation
     this.broadcast({
-      type: 'node_created',
-      node,
+      type: 'operation_processed',
       operation
     });
 
@@ -102,13 +101,12 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     };
     
     const operation = await this.builder.dispatch(createBookmarkOp);
-    const node = await this.builder.bookmarkTree.requireNode(nodeId);
     
     console.log('[SharedWorker] Created bookmark:', params.title, 'with nodeId:', nodeId);
     
+    // Broadcast operation_processed so clients can apply the operation
     this.broadcast({
-      type: 'node_created',
-      node,
+      type: 'operation_processed',
       operation
     });
 
@@ -124,8 +122,7 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     });
     
     this.broadcast({
-      type: 'node_removed',
-      nodeId,
+      type: 'operation_processed',
       operation
     });
   }
@@ -133,23 +130,15 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   async moveNode(params: { nodeId: NodeId; toFolderId: NodeId; index?: number }): Promise<void> {
     await this.ensureInitialized();
     
-    const node = await this.builder.bookmarkTree.getNode(params.nodeId);
-    const oldParentId = node?.parentId;
-    
     const operation = await this.builder.dispatch({
       type: 'move_node',
       ...params
     });
     
-    if (oldParentId) {
-      this.broadcast({
-        type: 'node_moved',
-        nodeId: params.nodeId,
-        oldParentId,
-        newParentId: params.toFolderId,
-        operation
-      });
-    }
+    this.broadcast({
+      type: 'operation_processed',
+      operation
+    });
   }
 
   async reorderNodes(params: { folderId: NodeId; fromIndex: number; toIndex: number }): Promise<void> {
@@ -174,11 +163,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       folderId,
       open
     });
-    const node = await this.builder.bookmarkTree.requireNode(folderId);
     
     this.broadcast({
-      type: 'node_updated',
-      node,
+      type: 'operation_processed',
       operation
     });
   }
@@ -279,7 +266,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   // Private Methods
   private broadcast(message: BroadcastMessage): void {
     try {
+      console.log('[SharedWorker] Broadcasting message:', message.type, message);
       this.broadcastChannel.postMessage(message);
+      console.log('[SharedWorker] Message broadcast successfully');
     } catch (error) {
       console.error('[SharedWorker] Failed to broadcast message:', error);
     }
