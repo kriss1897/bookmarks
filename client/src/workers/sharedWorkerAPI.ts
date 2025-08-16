@@ -37,6 +37,14 @@ export interface SharedWorkerAPI {
 
   // SSE Management
   getSSEState(): Promise<SSEConnectionState>;
+  
+  // Server Sync Management
+  getSyncStatus(): Promise<{ isSyncing: boolean; pendingCount?: number; failedCount?: number }>;
+  forceSyncOperation(operationId: string): Promise<boolean>;
+  syncOperationImmediately(operationId: string): Promise<boolean>;
+  
+  // Worker Management
+  cleanup(): Promise<void>;
 }
 
 // Message types for broadcast communication between tabs
@@ -51,7 +59,9 @@ export type BroadcastMessage =
   | { type: 'server_data_update'; operation: { type: string; data: unknown; timestamp?: string; envelope?: OperationEnvelope } }
   | { type: 'server_event_error'; error: string; event: ServerEvent }
   | { type: 'sse_state_changed'; state: SSEConnectionState }
-  | { type: 'hydrate_node'; nodeId: NodeId; nodeData: TreeNode; children: TreeNode[] };
+  | { type: 'hydrate_node'; nodeId: NodeId; nodeData: TreeNode; children: TreeNode[] }
+  | { type: 'sync_status_changed'; isSyncing: boolean; pendingCount?: number; failedCount?: number }
+  | { type: 'operation_sync_completed'; operationId: string; success: boolean; error?: string };
 
 // Connection info for tab management
 export interface TabConnection {

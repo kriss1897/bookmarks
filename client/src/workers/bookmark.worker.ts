@@ -13,6 +13,8 @@ import { SSEManager } from '../lib/sse/SSEManager';
 import type { ServerEvent, SSEConnectionState } from '../types/sse';
 import { convertServerEventToEnvelope, validateServerEventData } from '../lib/sseEventConverter';
 import { ServerAPI } from '../lib/serverAPI';
+import { ServerSyncService } from '../lib/ServerSyncService';
+import { databaseService } from './database';
 
 class BookmarkSharedWorker implements SharedWorkerAPI {
   private builder: TreeBuilder;
@@ -22,6 +24,7 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   private sseManager: SSEManager | null = null;
   private sseState: SSEConnectionState = { connected: false, connecting: false };
   private namespace = 'root'; // Use tree root ID as namespace
+  private serverSyncService: ServerSyncService;
 
   constructor() {
     console.log('[SharedWorker] BookmarkSharedWorker initialized');
@@ -30,6 +33,26 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       rootNode: { title: 'Bookmarks', id: 'root', isOpen: true }
     });
     // Initialization happens automatically with autoLoad: true (default)
+    
+    // Initialize server sync service with callbacks
+    this.serverSyncService = new ServerSyncService(databaseService, {}, {
+      onStatusChange: (status) => {
+        this.broadcast({
+          type: 'sync_status_changed',
+          isSyncing: status.isSyncing,
+          pendingCount: status.pendingCount,
+          failedCount: status.failedCount
+        });
+      },
+      onOperationSynced: (operationId, success, error) => {
+        this.broadcast({
+          type: 'operation_sync_completed',
+          operationId,
+          success,
+          error
+        });
+      }
+    });
   }
 
   // Wait for initialization to complete
@@ -180,6 +203,17 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     this.sseState = state;
     console.log('[SharedWorker] SSE state changed:', state);
     
+    // Start/stop server sync based on connection state
+    if (state.connected) {
+      console.log('[SharedWorker] SSE connected, starting server sync');
+      this.serverSyncService.startSync().catch(error => {
+        console.error('[SharedWorker] Failed to start server sync:', error);
+      });
+    } else {
+      console.log('[SharedWorker] SSE disconnected, stopping server sync');
+      this.serverSyncService.stopSync();
+    }
+    
     // Broadcast SSE state to all connected tabs via SSE channel
     this.broadcastSSE({
       type: 'sse_state_changed',
@@ -190,6 +224,62 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   // Get SSE connection state
   async getSSEState(): Promise<SSEConnectionState> {
     return { ...this.sseState };
+  }
+
+  // Server Sync Management
+  async getSyncStatus(): Promise<{ isSyncing: boolean; pendingCount?: number; failedCount?: number }> {
+    const syncStatus = this.serverSyncService.getSyncStatus();
+    
+    if (syncStatus.isSyncing) {
+      // Get additional stats when syncing
+      const pendingOps = await databaseService.getPendingOperations();
+      const failedOps = await databaseService.getFailedOperations();
+      
+      return {
+        isSyncing: true,
+        pendingCount: pendingOps.length,
+        failedCount: failedOps.length
+      };
+    }
+    
+    return { isSyncing: false };
+  }
+
+  async forceSyncOperation(operationId: string): Promise<boolean> {
+    console.log(`[SharedWorker] Force syncing operation: ${operationId}`);
+    return await this.serverSyncService.forceSyncOperation(operationId);
+  }
+
+  async syncOperationImmediately(operationId: string): Promise<boolean> {
+    console.log(`[SharedWorker] Immediately syncing operation: ${operationId}`);
+    return await this.serverSyncService.syncOperationImmediately(operationId);
+  }
+
+  // Private helper method to attempt immediate sync without throwing errors
+  private trySyncOperationImmediately(operationId: string): void {
+    // Only attempt sync if we have connections and SSE is connected
+    if (this.connections.size === 0 || !this.sseState.connected) {
+      return;
+    }
+
+    this.serverSyncService.syncOperationImmediately(operationId).catch(error => {
+      console.warn(`[SharedWorker] Failed to immediately sync operation ${operationId}:`, error);
+      // Don't throw - this is a best-effort sync
+      // The operation will be synced later during batch sync
+    });
+  }
+
+  // Cleanup method - can be called by the application when needed
+  public async cleanup(): Promise<void> {
+    console.log('[SharedWorker] Cleaning up SharedWorker resources');
+    
+    this.serverSyncService.destroy();
+    this.disconnectSSE();
+    
+    this.broadcastChannel.close();
+    this.sseBroadcastChannel.close();
+    
+    this.connections.clear();
   }
 
   async ping(): Promise<string> {
@@ -224,6 +314,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       operation
     });
 
+    // Try to sync immediately if connected
+    this.trySyncOperationImmediately(operation.id);
+
     return nodeId;
   }
 
@@ -253,6 +346,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       operation
     });
 
+    // Try to sync immediately if connected
+    this.trySyncOperationImmediately(operation.id);
+
     return nodeId;
   }
 
@@ -268,6 +364,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       type: 'operation_processed',
       operation
     });
+
+    // Try to sync immediately if connected
+    this.trySyncOperationImmediately(operation.id);
   }
 
   async moveNode(params: { nodeId: NodeId; toFolderId: NodeId; index?: number }): Promise<void> {
@@ -282,6 +381,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       type: 'operation_processed',
       operation
     });
+
+    // Try to sync immediately if connected
+    this.trySyncOperationImmediately(operation.id);
   }
 
   async reorderNodes(params: { folderId: NodeId; fromIndex: number; toIndex: number }): Promise<void> {
@@ -296,6 +398,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       type: 'operation_processed',
       operation
     });
+
+    // Try to sync immediately if connected
+    this.trySyncOperationImmediately(operation.id);
   }
 
   async toggleFolder(folderId: NodeId, open?: boolean): Promise<void> {
@@ -312,6 +417,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       type: 'operation_processed',
       operation
     });
+
+    // Try to sync immediately if connected
+    this.trySyncOperationImmediately(operation.id);
 
     if (open) {
       console.log('>>> FOLDER OPENED');
@@ -341,6 +449,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       type: 'operation_processed',
       operation
     });
+
+    // Try to sync immediately if connected
+    this.trySyncOperationImmediately(operation.id);
   }
 
   async loadFolderData(folderId: NodeId): Promise<void> {
@@ -366,7 +477,7 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       this.broadcast({
         type: 'hydrate_node',
         nodeId: folderId,
-        nodeData,
+        nodeData: nodeData as TreeNode, // Cast since we know this is safe from ServerAPI
         children
       });
       

@@ -132,6 +132,7 @@ export class SSEManager {
       console.log('SSE message received:', data);
       
       const serverEvent: ServerEvent = {
+        id: data.id || `sse-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         type: data.type || 'message',
         data,
         timestamp: data.timestamp || new Date().toISOString(),
@@ -150,6 +151,7 @@ export class SSEManager {
       console.log(`SSE ${eventType} event received:`, data);
       
       const serverEvent: ServerEvent = {
+        id: data.id || `sse-${eventType}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         type: eventType,
         data,
         timestamp: data.timestamp || new Date().toISOString(),

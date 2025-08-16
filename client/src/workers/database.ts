@@ -129,7 +129,8 @@ export class DatabaseService {
       ts: operation.ts,
       op: operation.op,
       processedAt: Date.now(),
-      status: 'completed'
+      status: operation.remote ? 'completed' : 'pending', // Mark remote operations as completed, local as pending
+      retryCount: 0
     };
 
     try {
@@ -139,6 +140,59 @@ export class DatabaseService {
     } catch (error) {
       console.error('[Database] Failed to append operation:', error);
       throw error;
+    }
+  }
+
+  async updateOperationStatus(operationId: string, status: 'completed' | 'pending' | 'failed', errorMessage?: string, retryCount?: number): Promise<void> {
+    try {
+      await this.db.operationLog
+        .where('id')
+        .equals(operationId)
+        .modify({
+          status,
+          errorMessage,
+          retryCount: retryCount !== undefined ? retryCount : undefined
+        });
+      console.log(`[Database] Updated operation ${operationId} status to ${status}`);
+    } catch (error) {
+      console.error(`[Database] Failed to update operation ${operationId} status:`, error);
+      throw error;
+    }
+  }
+
+  async getPendingOperations(): Promise<StoredOperation[]> {
+    try {
+      const pendingOps = await this.db.operationLog
+        .where('status')
+        .equals('pending')
+        .toArray();
+      
+      // Sort by timestamp manually since Dexie collection doesn't support orderBy on filtered results
+      pendingOps.sort((a, b) => a.ts - b.ts);
+      
+      console.log(`[Database] Found ${pendingOps.length} pending operations`);
+      return pendingOps;
+    } catch (error) {
+      console.error('[Database] Failed to get pending operations:', error);
+      return [];
+    }
+  }
+
+  async getFailedOperations(): Promise<StoredOperation[]> {
+    try {
+      const failedOps = await this.db.operationLog
+        .where('status')
+        .equals('failed')
+        .toArray();
+      
+      // Sort by timestamp manually
+      failedOps.sort((a, b) => a.ts - b.ts);
+      
+      console.log(`[Database] Found ${failedOps.length} failed operations`);
+      return failedOps;
+    } catch (error) {
+      console.error('[Database] Failed to get failed operations:', error);
+      return [];
     }
   }
 
