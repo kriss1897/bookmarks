@@ -9,12 +9,14 @@ import { useBroadcastChannel } from './useBroadcastChannel';
 import { TreeBuilder, type OperationEnvelope } from '../lib/builder/treeBuilder';
 import { createAPIProxy } from '../workers/sharedWorkerAPI.utils';
 import type { BroadcastMessage } from '../workers/sharedWorkerAPI';
+import type { SSEConnectionState } from '../types/sse';
 
 export function useSharedWorkerOperations() {
   const [builder, setBuilder] = useState<TreeBuilder | null>(null);
   const [, forceUpdate] = useReducer((c: number) => c + 1, 0);
   const [loading, setLoading] = useState(true);
   const [operationsLoaded, setOperationsLoaded] = useState(false);
+  const [sseState, setSSEState] = useState<SSEConnectionState>({ connected: false, connecting: false });
 
   // Use separated connection management
   const { 
@@ -61,7 +63,7 @@ export function useSharedWorkerOperations() {
     }
   }, [api, workerProxy, isConnected]);
 
-  // Handle broadcast messages for real-time operation sync
+  // Handle broadcast messages for real-time operation sync (excluding SSE)
   const handleMessage = useCallback(async (message: BroadcastMessage) => {
     console.log('[Client] Received broadcast message:', message.type, message);
     
@@ -101,6 +103,63 @@ export function useSharedWorkerOperations() {
     }
   }, [builder, forceUpdate, loadOperations]);
 
+  // Handle SSE-specific broadcast messages
+  const handleSSEMessage = useCallback(async (message: BroadcastMessage) => {
+    console.log('[Client] Received SSE broadcast message:', message.type, message);
+    
+    switch (message.type) {
+      case 'server_event':
+        // Handle raw server events received via SSE
+        console.log('[Client] Received server event:', message.event);
+        // Raw events are processed by the SharedWorker, so just log here
+        break;
+        
+      case 'server_data_update':
+        // Handle server data updates that have been processed
+        console.log('[Client] Received server data update:', message.operation);
+        
+        // If the update includes an envelope (processed operation), we can apply it locally
+        if (message.operation.envelope && builder) {
+          try {
+            console.log('[Client] Applying remote operation from server:', message.operation.envelope);
+            console.log('[Client] Builder log length before:', builder.log.length);
+            
+            // Apply the remote operation without recording it again (it's already persisted by SharedWorker)
+            await builder.apply(message.operation.envelope, { record: false });
+            
+            console.log('[Client] Builder log length after:', builder.log.length);
+            console.log('[Client] Remote operation applied successfully, forcing update');
+            forceUpdate();
+          } catch (err) {
+            console.error('[Client] Failed to apply remote operation:', message.operation.envelope, err);
+            // If we can't apply the remote operation, reload all operations
+            console.log('[Client] Reloading all operations due to remote operation error');
+            loadOperations();
+          }
+        } else {
+          // Just force update to reflect any changes
+          console.log('[Client] Forcing update for server data change');
+          forceUpdate();
+        }
+        break;
+        
+      case 'server_event_error':
+        // Handle server event processing errors
+        console.error('[Client] Server event processing error:', message.error, message.event);
+        // Could show user notification here
+        break;
+        
+      case 'sse_state_changed':
+        // Update SSE connection state
+        console.log('[Client] SSE state changed:', message.state);
+        setSSEState(message.state);
+        break;
+        
+      default:
+        console.log('[Client] Unhandled SSE broadcast message type:', message.type);
+    }
+  }, [builder, forceUpdate, setSSEState, loadOperations]);
+
   // Use separated broadcast channel management with message handler
   const {
     lastMessage,
@@ -108,8 +167,13 @@ export function useSharedWorkerOperations() {
     error: broadcastError
   } = useBroadcastChannel('bookmarks-sync', handleMessage);
 
+  // Use SSE broadcast channel for SSE-specific messages
+  const {
+    error: sseBroadcastError
+  } = useBroadcastChannel('bookmarks-sse', handleSSEMessage);
+
   // Combined error state
-  const error = connectionError || broadcastError;
+  const error = connectionError || broadcastError || sseBroadcastError;
 
   // Load operations when connected
   useEffect(() => {
@@ -180,6 +244,9 @@ export function useSharedWorkerOperations() {
     error,
     connected: isConnected,
     operationsLoaded,
+    
+    // SSE state
+    sseState,
     
     // Debug info
     lastUpdate: Date.now(), // Add timestamp to help track updates

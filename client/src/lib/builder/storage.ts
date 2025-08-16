@@ -88,6 +88,21 @@ export class IndexedDBOperationStorage extends OperationStorage {
     }
   }
 
+  async updateOperationStatus(operationId: string, status: 'completed' | 'pending' | 'failed', errorMessage?: string): Promise<void> {
+    try {
+      if ('updateOperationStatus' in this.databaseService) {
+        await (this.databaseService as DatabaseServiceInterface & {
+          updateOperationStatus(id: string, status: string, error?: string): Promise<void>;
+        }).updateOperationStatus(operationId, status, errorMessage);
+        console.log(`[IndexedDBOperationStorage] Updated operation ${operationId} status to ${status}`);
+      } else {
+        console.warn('[IndexedDBOperationStorage] Database service does not support status updates');
+      }
+    } catch (error) {
+      console.error(`[IndexedDBOperationStorage] Failed to update operation status:`, error);
+    }
+  }
+
   async loadOperations(): Promise<OperationEnvelope[]> {
     try {
       const storedOperations = await this.databaseService.loadOperationLog();

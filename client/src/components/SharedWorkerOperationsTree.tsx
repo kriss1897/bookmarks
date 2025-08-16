@@ -17,6 +17,7 @@ export const SharedWorkerOperationsTree: React.FC = () => {
     error,
     connected,
     operationsLoaded,
+    sseState,
     createFolder,
     createBookmark,
     removeNode,
@@ -176,8 +177,21 @@ export const SharedWorkerOperationsTree: React.FC = () => {
           }`} />
           {connected ? 'Connected' : 'Disconnected'}
         </div>
+        <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs ${
+          sseState.connected 
+            ? 'bg-blue-100 text-blue-800' 
+            : sseState.connecting
+            ? 'bg-yellow-100 text-yellow-800'
+            : 'bg-gray-100 text-gray-800'
+        }`}>
+          <div className={`w-2 h-2 rounded-full ${
+            sseState.connected ? 'bg-blue-500' : sseState.connecting ? 'bg-yellow-500' : 'bg-gray-500'
+          }`} />
+          SSE: {sseState.connected ? 'Connected' : sseState.connecting ? 'Connecting' : 'Disconnected'}
+          {sseState.reconnectAttempt ? ` (${sseState.reconnectAttempt})` : ''}
+        </div>
         <span className="text-xs text-muted-foreground">
-          Operations-based ({operations.length} ops) {connected ? '🟢' : '🔴'}
+          Operations-based ({operations.length} ops) SW:{connected ? '🟢' : '🔴'} SSE:{sseState.connected ? '🟢' : '🔴'}
         </span>
         <Button onClick={reload} size="sm" variant="outline">
           Reload

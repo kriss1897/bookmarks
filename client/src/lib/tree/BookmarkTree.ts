@@ -21,6 +21,7 @@ export interface BookmarkNode extends BookmarkBaseNode {
 export interface FolderNode extends BookmarkBaseNode {
   kind: "folder";
   isOpen: boolean;
+  isLoaded: boolean; // Indicates if children data has been loaded from server
   children: NodeId[]; // Maintained for compatibility, but tree structure is managed by storage
 }
 
@@ -52,6 +53,7 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
       kind: "folder",
       title: config.rootTitle || "Bookmarks",
       isOpen: true,
+      isLoaded: true, // Root folder is always considered loaded
       children: []
     };
     
@@ -129,7 +131,8 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
       kind: "folder",
       title: params.title,
       parentId,
-      isOpen: params.isOpen ?? true,
+      isOpen: /* params.isOpen ?? */ false, // New folders are closed by default
+      isLoaded: false, // New folders need to be loaded from server
       children: [],
       createdAt: now,
       updatedAt: now,
@@ -252,6 +255,26 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
    */
   async closeFolder(folderId: NodeId): Promise<void> {
     await this.toggleFolder(folderId, false);
+  }
+
+  /**
+   * Mark a folder as loaded (children have been fetched)
+   */
+  async markFolderAsLoaded(folderId: NodeId): Promise<void> {
+    const folder = await this.requireFolder(folderId);
+    const updatedFolder = {
+      ...folder,
+      isLoaded: true
+    };
+    await this.setNode(updatedFolder);
+  }
+
+  /**
+   * Check if a folder's children are loaded
+   */
+  async isFolderLoaded(folderId: NodeId): Promise<boolean> {
+    const folder = await this.requireFolder(folderId);
+    return folder.isLoaded;
   }
 
   /**
