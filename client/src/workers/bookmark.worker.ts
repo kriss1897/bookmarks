@@ -12,6 +12,7 @@ import type { NodeId, BookmarkTreeNode as TreeNode } from '@/lib/tree';
 import { SSEManager } from '../lib/sse/SSEManager';
 import type { ServerEvent, SSEConnectionState } from '../types/sse';
 import { convertServerEventToEnvelope, validateServerEventData } from '../lib/sseEventConverter';
+import { ServerAPI } from '../lib/serverAPI';
 
 class BookmarkSharedWorker implements SharedWorkerAPI {
   private builder: TreeBuilder;
@@ -196,7 +197,7 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   }
 
   // Tree Operations
-  async createFolder(params: { parentId?: NodeId; title: string; isOpen?: boolean; id?: NodeId; index?: number }): Promise<NodeId> {
+  async createFolder(params: { parentId?: NodeId; title: string; isOpen?: boolean; isLoaded?: boolean; id?: NodeId; index?: number }): Promise<NodeId> {
     await this.ensureInitialized();
     
     // Generate ID here if not provided to ensure we can track it
@@ -208,7 +209,8 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       id: nodeId,
       parentId: params.parentId,
       title: params.title,
-      isOpen: params.isOpen,
+      isOpen: params.isOpen ?? false, // New folders are closed by default
+      isLoaded: params.isLoaded ?? false, // New folders need to be loaded from server
       index: params.index
     };
     
@@ -299,6 +301,7 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   async toggleFolder(folderId: NodeId, open?: boolean): Promise<void> {
     await this.ensureInitialized();
     
+    // First, toggle the folder open/closed
     const operation = await this.builder.dispatch({
       type: 'toggle_folder',
       folderId,
@@ -309,6 +312,77 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       type: 'operation_processed',
       operation
     });
+
+    if (open) {
+      console.log('>>> FOLDER OPENED');
+    }
+
+    // Check if the folder needs to be loaded when opening
+    if (open !== false) { // If opening or toggling to open
+      const folder = await this.builder.bookmarkTree.getNode(folderId);
+      if (folder?.kind === 'folder' && !folder.isLoaded) {
+        // Trigger async loading (don't await to prevent blocking)
+        this.loadFolderData(folderId).catch(error => {
+          console.error('[SharedWorker] Failed to load folder data:', error);
+        });
+      }
+    }
+  }
+
+  async markFolderAsLoaded(folderId: NodeId): Promise<void> {
+    await this.ensureInitialized();
+    
+    const operation = await this.builder.dispatch({
+      type: 'mark_folder_loaded',
+      folderId
+    });
+    
+    this.broadcast({
+      type: 'operation_processed',
+      operation
+    });
+  }
+
+  async loadFolderData(folderId: NodeId): Promise<void> {
+    await this.ensureInitialized();
+    
+    try {
+      console.log(`[SharedWorker] Loading folder data for: ${folderId}`);
+      
+      // Fetch data from server (this is the dummy implementation)
+      const { node: nodeData, children } = await ServerAPI.fetchNodeWithChildren(folderId);
+      
+      console.log(`[SharedWorker] Received data for folder ${folderId}:`, { nodeData, children });
+      
+      // Apply hydrate operation to update the tree
+      const operation = await this.builder.dispatch({
+        type: 'hydrate_node',
+        nodeId: folderId,
+        nodeData: nodeData as unknown as Record<string, unknown>,
+        children: children as unknown as Record<string, unknown>[]
+      });
+      
+      // Broadcast the hydrate_node event for immediate UI updates
+      this.broadcast({
+        type: 'hydrate_node',
+        nodeId: folderId,
+        nodeData,
+        children
+      });
+      
+      // Also broadcast the operation_processed for consistency
+      this.broadcast({
+        type: 'operation_processed',
+        operation
+      });
+      
+      console.log(`[SharedWorker] Successfully loaded and hydrated folder: ${folderId}`);
+      
+    } catch (error) {
+      console.error(`[SharedWorker] Failed to load folder data for ${folderId}:`, error);
+
+      throw error;
+    }
   }
 
   // Tree State

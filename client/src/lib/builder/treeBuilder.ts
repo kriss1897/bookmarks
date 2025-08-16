@@ -3,7 +3,7 @@
  * Uses an abstract storage interface to support both in-memory and persistent storage.
  */
 
-import { BookmarkTree, createMemoryBookmarkTree, type NodeId } from "../tree";
+import { BookmarkTree, createMemoryBookmarkTree, type NodeId, type BookmarkTreeNode } from "../tree";
 import type { OperationStorage } from "./storage";
 import { MemoryOperationStorage } from "./storage";
 
@@ -14,6 +14,7 @@ export type CreateFolderOp = {
   parentId?: NodeId; // defaults to root
   title: string;
   isOpen?: boolean;
+  isLoaded?: boolean; // whether children data has been loaded
   index?: number; // insertion index among siblings
 };
 
@@ -44,6 +45,15 @@ export type OpenFolderOp = { type: "open_folder"; folderId: NodeId };
 export type CloseFolderOp = { type: "close_folder"; folderId: NodeId };
 export type ToggleFolderOp = { type: "toggle_folder"; folderId: NodeId; open?: boolean };
 export type RemoveNodeOp = { type: "remove_node"; nodeId: NodeId };
+export type MarkFolderLoadedOp = { type: "mark_folder_loaded"; folderId: NodeId };
+export type HydrateNodeOp = { 
+  type: "hydrate_node"; 
+  nodeId: NodeId; 
+  nodeData: Record<string, unknown>;
+  children: Record<string, unknown>[];
+};
+// Keep this for edge cases but don't use in main flow
+export type MarkFolderNotLoadedOp = { type: "mark_folder_not_loaded"; folderId: NodeId };
 
 export type TreeOperation =
   | CreateFolderOp
@@ -53,7 +63,10 @@ export type TreeOperation =
   | OpenFolderOp
   | CloseFolderOp
   | ToggleFolderOp
-  | RemoveNodeOp;
+  | RemoveNodeOp
+  | MarkFolderLoadedOp
+  | HydrateNodeOp
+  | MarkFolderNotLoadedOp; // Keep for edge cases
 
 // Envelope adds metadata useful for persistence/sync
 export interface OperationEnvelope {
@@ -286,6 +299,15 @@ export class TreeBuilder {
   removeNode(op: Omit<RemoveNodeOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "remove_node", ...op });
   }
+  markFolderNotLoaded(op: Omit<MarkFolderNotLoadedOp, "type">): Promise<OperationEnvelope> {
+    return this.dispatch({ type: "mark_folder_not_loaded", ...op });
+  }
+  markFolderLoaded(op: Omit<MarkFolderLoadedOp, "type">): Promise<OperationEnvelope> {
+    return this.dispatch({ type: "mark_folder_loaded", ...op });
+  }
+  hydrateNode(op: Omit<HydrateNodeOp, "type">): Promise<OperationEnvelope> {
+    return this.dispatch({ type: "hydrate_node", ...op });
+  }
 
   /**
    * Clear all persisted operations (useful for testing)
@@ -312,6 +334,14 @@ export class TreeBuilder {
           isOpen: op.isOpen,
           index: op.index,
         });
+        
+        // Handle isLoaded state after creation (since BookmarkTree defaults to false)
+        if (op.isLoaded !== undefined && op.id) {
+          if (op.isLoaded) {
+            await this.bookmarkTree.markFolderAsLoaded(op.id);
+          }
+          // No need to mark as not loaded since that's the default now
+        }
         break;
       }
       case "create_bookmark": {
@@ -347,6 +377,53 @@ export class TreeBuilder {
       }
       case "remove_node": {
         await this.bookmarkTree.remove(op.nodeId);
+        break;
+      }
+      case "mark_folder_loaded": {
+        await this.bookmarkTree.markFolderAsLoaded(op.folderId);
+        break;
+      }
+      case "hydrate_node": {
+        // Hydrate a node with data from server
+        // First update the node itself with partial data from server
+        const currentNode = await this.bookmarkTree.getNode(op.nodeId);
+        if (currentNode) {
+          // Merge server data with existing node, preserving critical properties
+          const updatedNode = { 
+            ...currentNode, 
+            ...op.nodeData,
+            // Ensure these critical properties are preserved
+            id: currentNode.id,
+            parentId: currentNode.parentId,
+            createdAt: currentNode.createdAt
+          } as BookmarkTreeNode;
+          await this.bookmarkTree.setNode(updatedNode);
+        }
+        
+        // Then add all children
+        for (const childData of op.children) {
+          const childNode = childData as unknown as BookmarkTreeNode;
+          await this.bookmarkTree.setNode(childNode);
+        }
+        
+        // Update the parent-child relationship for the hydrated folder
+        if (currentNode?.kind === 'folder') {
+          // Mark the folder as loaded
+          await this.bookmarkTree.markFolderAsLoaded(op.nodeId);
+          
+          // Update the folder's children array to reflect the new children
+          const childrenIds = op.children.map((child: Record<string, unknown>) => child.id as NodeId);
+          const updatedFolder = {
+            ...currentNode,
+            ...op.nodeData,
+            id: currentNode.id,
+            parentId: currentNode.parentId,
+            createdAt: currentNode.createdAt,
+            children: childrenIds,
+            isLoaded: true
+          } as BookmarkTreeNode;
+          await this.bookmarkTree.setNode(updatedFolder);
+        }
         break;
       }
       default: {
