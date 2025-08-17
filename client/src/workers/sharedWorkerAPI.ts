@@ -45,6 +45,9 @@ export interface SharedWorkerAPI {
   
   // Worker Management
   cleanup(): Promise<void>;
+
+  // Namespace Management
+  setNamespace(namespace: string): Promise<void>;
 }
 
 // Message types for broadcast communication between tabs

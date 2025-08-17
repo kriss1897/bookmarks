@@ -1,11 +1,17 @@
 import BookmarkTreeView from "@/components/BookmarkTreeView";
 import { ServerSyncStatus } from "@/components/ServerSyncStatus";
+import NamespaceOnboarding from "@/components/NamespaceOnboarding";
 
 function App() {
   return (
     <div className="flex min-h-svh flex-col items-center justify-start">
       <div className="w-full max-w-6xl space-y-8 p-4">
         <h1 className="text-2xl font-bold text-center mb-8">Multi-Tab Sync Demo</h1>
+
+        {/* Namespace selection */}
+        <div className="mb-6">
+          <NamespaceOnboarding />
+        </div>
 
         {/* Server Sync Status */}
         <div className="space-y-2">

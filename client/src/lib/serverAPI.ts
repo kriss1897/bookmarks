@@ -42,6 +42,48 @@ export class ServerAPI {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
+  /** List available namespaces from the server */
+  static async fetchNamespaces(): Promise<Array<{ namespace: string; rootNodeId: string; rootNodeTitle: string }>> {
+    const url = `${this.config.baseURL}/api/namespaces`;
+    const res = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const json = await res.json();
+    if (!json?.success || !Array.isArray(json.data)) throw new Error(json?.message || 'Failed to fetch namespaces');
+    return json.data as Array<{ namespace: string; rootNodeId: string; rootNodeTitle: string }>;
+  }
+
+  /**
+   * Resolve and fetch the initial root for current namespace with fallbacks.
+   * Returns node + children and the resolved server rootId.
+   */
+  static async fetchInitialTree(options?: { signal?: AbortSignal }): Promise<(NodeWithChildren & { rootId: NodeId }) | null> {
+    const candidates = ['root', 'default-root', `${this.config.namespace}-root`];
+
+    // Try common candidates first
+    for (const candidate of candidates) {
+      try {
+        const data = await this.fetchNodeWithChildren(candidate as NodeId, options);
+        return { ...data, rootId: candidate as NodeId };
+      } catch {
+        continue;
+      }
+    }
+
+    // Fallback to namespaces endpoint
+    try {
+      const namespaces = await this.fetchNamespaces();
+      const match = namespaces.find(n => n.namespace === this.config.namespace);
+      if (match?.rootNodeId) {
+        const data = await this.fetchNodeWithChildren(match.rootNodeId as NodeId, options);
+        return { ...data, rootId: match.rootNodeId as NodeId };
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
+  }
+
   /**
    * Fetch a node and its children from the server
    * @param nodeId - The ID of the node to fetch
