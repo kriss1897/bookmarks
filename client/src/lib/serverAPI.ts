@@ -209,23 +209,53 @@ export class ServerAPI {
    * @returns Promise containing the operation result
    */
   static async applyOperation(
-    operation: OperationEnvelope
-    // options?: { signal?: AbortSignal }
+    operation: OperationEnvelope,
+    options?: { signal?: AbortSignal }
   ): Promise<OperationResult> {
     // Validate operation
     if (!operation?.id || !operation?.op?.type) {
       throw new Error('Invalid operation: missing id or operation type');
     }
 
+    const url = `${this.config.baseURL}/api/${this.config.namespace}/operations/apply`;
+    
     console.log(`[ServerAPI] Applying operation to server:`, operation.id, operation.op.type);
     
-    // TODO: Implement real operation application to server
-    // For now, return success to maintain compatibility
-    console.log(`[ServerAPI] Operation applied successfully:`, operation.id);
-    return {
-      success: true,
-      operationId: operation.id,
-      message: 'Operation applied successfully'
-    };
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(operation),
+        signal: options?.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.success) {
+        console.warn(`[ServerAPI] Server rejected operation ${operation.id}:`, result.error);
+        return {
+          success: false,
+          operationId: operation.id,
+          error: result.error || 'Server rejected operation'
+        };
+      }
+
+      console.log(`[ServerAPI] Operation applied successfully:`, operation.id);
+      return {
+        success: true,
+        operationId: operation.id,
+        message: result.message || 'Operation applied successfully'
+      };
+      
+    } catch (error) {
+      console.error(`[ServerAPI] Failed to apply operation ${operation.id}:`, error);
+      throw error;
+    }
   }
 }

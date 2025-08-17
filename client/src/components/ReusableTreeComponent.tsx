@@ -670,8 +670,6 @@ function formatOp(env: { id: string; op: TreeOperation }): string {
       return `open_folder(${op.folderId})`;
     case "close_folder":
       return `close_folder(${op.folderId})`;
-    case "toggle_folder":
-      return `toggle_folder(${op.folderId}${typeof op.open === "boolean" ? ", open=" + op.open : ""})`;
     case "remove_node":
       return `remove_node(${op.nodeId})`;
     default:

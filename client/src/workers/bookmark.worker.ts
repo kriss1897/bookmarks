@@ -150,7 +150,8 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       case 'bookmark_deleted':
       case 'folder_deleted':
       case 'item_moved':
-      case 'folder_toggled':
+      case 'open_folder':
+      case 'close_folder':
         this.handleServerDataEvent(event);
         break;
       default:
@@ -219,13 +220,14 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
     // Start/stop server sync based on connection state
     if (state.connected) {
-      // console.log('[SharedWorker] SSE connected, starting server sync');
-      // this.serverSyncService.startSync().catch(error => {
-      //   console.error('[SharedWorker] Failed to start server sync:', error);
-      // });
-
       // Trigger root node hydration on connection/reconnection
-      this.hydrateRootNode().catch((error: Error) => {
+      this.hydrateRootNode().then(() => {
+        console.log('[SharedWorker] SSE connected, starting server sync');
+        this.serverSyncService.startSync()
+          .catch(error => {
+            console.error('[SharedWorker] Failed to start server sync:', error);
+          });
+      }).catch((error: Error) => {
         console.error('[SharedWorker] Failed to hydrate root node on SSE connection:', error);
       });
     } else {
@@ -487,31 +489,51 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   async toggleFolder(folderId: NodeId, open?: boolean): Promise<void> {
     await this.ensureInitialized();
 
-    // First, toggle the folder open/closed
-    const operation = await this.builder.dispatch({
-      type: 'toggle_folder',
-      folderId,
-      open
-    });
+    // Backwards-compatible: translate toggleFolder into explicit open/close ops
+    if (typeof open === 'boolean') {
+      if (open) {
+        await this.openFolder(folderId);
+      } else {
+        await this.closeFolder(folderId);
+      }
+      return;
+    }
 
-    this.broadcast({
-      type: 'operation_processed',
-      operation
-    });
+    // If open is undefined, determine current state and invert it by reading tree
+  const node = await this.builder.bookmarkTree.getNode(folderId);
+  const nodeAsFolder = node as unknown as { isOpen?: boolean } | undefined;
+  const currentlyOpen = nodeAsFolder && nodeAsFolder.isOpen === true;
+    if (currentlyOpen) {
+      await this.closeFolder(folderId);
+    } else {
+      await this.openFolder(folderId);
+    }
 
-    // Try to sync immediately if connected
+    return;
+  }
+
+  async openFolder(folderId: NodeId): Promise<void> {
+    await this.ensureInitialized();
+    const operation = await this.builder.dispatch({ type: 'open_folder', folderId });
+
+    this.broadcast({ type: 'operation_processed', operation });
     this.trySyncOperationImmediately(operation.id);
 
-    // Check if the folder needs to be loaded when opening
-    if (open !== false) { // If opening or toggling to open
-      const folder = await this.builder.bookmarkTree.getNode(folderId);
-      if (folder?.kind === 'folder' && !folder.isLoaded) {
-        // Trigger async loading (don't await to prevent blocking)
-        this.loadFolderData(folderId).catch(error => {
-          console.error('[SharedWorker] Failed to load folder data:', error);
-        });
-      }
+    // Load children when opening
+    const folder = await this.builder.bookmarkTree.getNode(folderId);
+    if (folder?.kind === 'folder' && !folder.isLoaded) {
+      this.loadFolderData(folderId).catch(error => {
+        console.error('[SharedWorker] Failed to load folder data:', error);
+      });
     }
+  }
+
+  async closeFolder(folderId: NodeId): Promise<void> {
+    await this.ensureInitialized();
+    const operation = await this.builder.dispatch({ type: 'close_folder', folderId });
+
+    this.broadcast({ type: 'operation_processed', operation });
+    this.trySyncOperationImmediately(operation.id);
   }
 
   async markFolderAsLoaded(folderId: NodeId): Promise<void> {

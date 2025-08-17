@@ -115,8 +115,9 @@ export class SSEManager {
       'folder_created',
       'folder_updated',
       'folder_deleted',
-      'item_moved',
-      'folder_toggled'
+  'item_moved',
+  'open_folder',
+  'close_folder'
     ];
 
     eventTypes.forEach(eventType => {

@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import cors from 'cors';
 import { initializeDatabase } from './db/index.js';
 import { BookmarkService } from './db/service.js';
 import { EventsManager } from './services/EventsManager.js';
@@ -21,6 +22,7 @@ const eventPublisher = new EventPublisher(eventsManager);
 const eventsController = new EventsController(eventsManager);
 
 // Middleware
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -98,7 +100,40 @@ app.get('/api/:namespace/tree/node/:nodeId', async (req: Request, res: Response)
   try {
     const { namespace, nodeId } = req.params;
 
-    console.log({ namespace, nodeId });
+    if (nodeId === 'root') {
+      // check if the root node exists in the namespace
+      const root = await bookmarkService.getRootNode(namespace);
+
+      // if it does not exist, create a root node
+      if (!root) {
+        await bookmarkService.createFolder(
+          namespace,
+          {
+            id: 'root',
+            parentId: null,
+            orderKey: null,
+          },
+          {
+            title: namespace,
+            isOpen: true,
+          }
+        );
+
+        // and create a root folder as well
+        await bookmarkService.createFolder(
+          namespace,
+          {
+            id: 'root',
+            parentId: null,
+            orderKey: null,
+          },
+          {
+            title: namespace,
+            isOpen: true,
+          }
+        );
+      }
+    }
 
     const tree = await bookmarkService.getNodeWithChildren(namespace, nodeId);
     
@@ -218,6 +253,25 @@ app.post('/api/:namespace/nodes', async (req: Request, res: Response) => {
       });
     }
 
+    // Broadcast creation event with flattened payload
+    if (kind === 'folder') {
+      eventPublisher.publishToNamespace(namespace, {
+        type: 'folder_created',
+        id: node.id,
+        parentId: node.parentId,
+        title: node.title,
+        isOpen: (node as any).isOpen === true
+      });
+    } else {
+      eventPublisher.publishToNamespace(namespace, {
+        type: 'bookmark_created',
+        id: node.id,
+        parentId: node.parentId,
+        title: node.title,
+        url: (node as any).url
+      });
+    }
+
     res.status(201).json({
       success: true,
       data: node,
@@ -261,6 +315,24 @@ app.put('/api/:namespace/nodes/:id', async (req: Request, res: Response) => {
       });
     }
 
+    // Broadcast update events
+    if (isOpen !== undefined && node.kind === 'folder') {
+      // Broadcast explicit open/close event
+      eventPublisher.publishToNamespace(namespace, {
+        type: isOpen ? 'open_folder' : 'close_folder',
+        id: node.id,
+        isOpen: !!isOpen
+      });
+    } else {
+      eventPublisher.publishToNamespace(namespace, {
+        type: node.kind === 'folder' ? 'folder_updated' : 'bookmark_updated',
+        id: node.id,
+        parentId: node.parentId,
+        title: node.title,
+        ...(node.kind === 'bookmark' ? { url: (node as any).url } : {})
+      });
+    }
+
     res.json({
       success: true,
       data: node,
@@ -281,12 +353,25 @@ app.delete('/api/:namespace/nodes/:id', async (req: Request, res: Response) => {
   try {
     const { namespace, id } = req.params;
     
+    // Get node info before deletion for event
+    const nodeToDelete = await bookmarkService.getNode(namespace, id);
+    
     const deleted = await bookmarkService.deleteNode(namespace, id);
     
     if (!deleted) {
       return res.status(404).json({
         success: false,
         message: 'Node not found'
+      });
+    }
+
+    // Broadcast deletion event
+    if (nodeToDelete) {
+      eventPublisher.publishToNamespace(namespace, {
+        type: nodeToDelete.kind === 'folder' ? 'folder_deleted' : 'bookmark_deleted',
+        message: `${nodeToDelete.kind} deleted: ${nodeToDelete.title}`,
+        nodeId: id,
+        data: { id, kind: nodeToDelete.kind, title: nodeToDelete.title }
       });
     }
 
@@ -346,6 +431,14 @@ app.post('/api/:namespace/nodes/:id/move', async (req: Request, res: Response) =
       });
     }
 
+    // Broadcast move event with flattened payload
+    eventPublisher.publishToNamespace(namespace, {
+      type: 'item_moved',
+      id: node.id,
+      parentId: node.parentId,
+      title: node.title
+    });
+
     res.json({
       success: true,
       data: node,
@@ -386,6 +479,98 @@ app.post('/api/broadcast', (req: Request, res: Response) => {
     success: true, 
     message: `Broadcasted ${type} to namespace ${namespace}` 
   });
+});
+
+// Apply an operation envelope (client sync)
+app.post('/api/:namespace/operations/apply', async (req: Request, res: Response) => {
+  try {
+    const { namespace } = req.params;
+    const envelope = req.body as {
+      id?: string;
+      ts?: number;
+      op?: { type?: string; [k: string]: unknown };
+    };
+
+    if (!envelope || !envelope.id || !envelope.ts || !envelope.op || !envelope.op.type) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid operation envelope: id, ts and op.type are required'
+      });
+    }
+
+    const result = await bookmarkService.applyOperationEnvelope(namespace, envelope as any);
+
+    if (result.success) {
+      // Broadcast a specific event based on op.type for clients
+      const t = envelope.op.type;
+      const d: any = result.data || {};
+      switch (t) {
+        case 'create_folder':
+          eventPublisher.publishToNamespace(namespace, {
+            type: 'folder_created',
+            id: d.id || envelope.op.id,
+            parentId: d.parentId ?? envelope.op.parentId ?? null,
+            title: d.title ?? envelope.op.title,
+            isOpen: d.isOpen ?? envelope.op.isOpen ?? true
+          });
+          break;
+        case 'create_bookmark':
+          eventPublisher.publishToNamespace(namespace, {
+            type: 'bookmark_created',
+            id: d.id || envelope.op.id,
+            parentId: d.parentId ?? envelope.op.parentId ?? null,
+            title: d.title ?? envelope.op.title,
+            url: d.url ?? envelope.op.url
+          });
+          break;
+        case 'move_node':
+        case 'move_item_to_folder':
+          eventPublisher.publishToNamespace(namespace, {
+            type: 'item_moved',
+            id: envelope.op.nodeId,
+            parentId: d.parentId ?? envelope.op.toFolderId
+          });
+          break;
+        case 'open_folder':
+        case 'close_folder': {
+          const folderId = (envelope.op as any).folderId;
+          const isOpen = t === 'open_folder' ? true : false;
+
+          eventPublisher.publishToNamespace(namespace, {
+            type: isOpen ? 'open_folder' : 'close_folder',
+            id: folderId,
+            isOpen
+          });
+
+          break;
+        }
+        case 'remove_node':
+          eventPublisher.publishToNamespace(namespace, {
+            type: 'folder_deleted',
+            id: (envelope.op as any).nodeId
+          });
+          break;
+        default:
+          // Fallback generic operation event
+          eventPublisher.publishToNamespace(namespace, {
+            type: 'operation',
+            operationId: result.operationId,
+            op: envelope.op
+          });
+      }
+
+      return res.json(result);
+    }
+
+    return res.status(400).json(result);
+  } catch (error) {
+    console.error('Error applying operation:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
 });
 
 export default app;

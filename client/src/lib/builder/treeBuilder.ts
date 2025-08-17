@@ -16,6 +16,7 @@ export type CreateFolderOp = {
   isOpen?: boolean;
   isLoaded?: boolean; // whether children data has been loaded
   index?: number; // insertion index among siblings
+  orderKey?: string; // client-generated fractional key to send to server
 };
 
 export type CreateBookmarkOp = {
@@ -25,6 +26,7 @@ export type CreateBookmarkOp = {
   title: string;
   url: string;
   index?: number;
+  orderKey?: string; // client-generated fractional key to send to server
 };
 
 export type MoveNodeOp = {
@@ -32,6 +34,7 @@ export type MoveNodeOp = {
   nodeId: NodeId;
   toFolderId: NodeId;
   index?: number; // target insertion index
+  orderKey?: string; // client-generated fractional key to send to server
 };
 
 export type ReorderOp = {
@@ -43,7 +46,7 @@ export type ReorderOp = {
 
 export type OpenFolderOp = { type: "open_folder"; folderId: NodeId };
 export type CloseFolderOp = { type: "close_folder"; folderId: NodeId };
-export type ToggleFolderOp = { type: "toggle_folder"; folderId: NodeId; open?: boolean };
+// Deprecated toggle operation removed; use explicit open_folder / close_folder ops
 export type RemoveNodeOp = { type: "remove_node"; nodeId: NodeId };
 export type MarkFolderLoadedOp = { type: "mark_folder_loaded"; folderId: NodeId };
 export type HydrateNodeOp = {
@@ -62,7 +65,6 @@ export type TreeOperation =
   | ReorderOp
   | OpenFolderOp
   | CloseFolderOp
-  | ToggleFolderOp
   | RemoveNodeOp
   | MarkFolderLoadedOp
   | HydrateNodeOp
@@ -283,9 +285,6 @@ export class TreeBuilder {
   closeFolder(op: Omit<CloseFolderOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "close_folder", ...op });
   }
-  toggleFolder(op: Omit<ToggleFolderOp, "type">): Promise<OperationEnvelope> {
-    return this.dispatch({ type: "toggle_folder", ...op });
-  }
   removeNode(op: Omit<RemoveNodeOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "remove_node", ...op });
   }
@@ -317,6 +316,7 @@ export class TreeBuilder {
   private async applyOperation(op: TreeOperation): Promise<void> {
     switch (op.type) {
       case "create_folder": {
+        // Execute locally first to compute orderKey
         await this.bookmarkTree.createFolder({
           id: op.id,
           parentId: op.parentId,
@@ -324,6 +324,14 @@ export class TreeBuilder {
           isOpen: op.isOpen,
           index: op.index,
         });
+
+        // After local creation, read back node to capture orderKey for server
+        if (op.id) {
+          const created = await this.bookmarkTree.getNode(op.id);
+          if (created && 'orderKey' in created) {
+            op.orderKey = (created as BookmarkTreeNode).orderKey;
+          }
+        }
 
         // Handle isLoaded state after creation (since BookmarkTree defaults to false)
         if (op.isLoaded !== undefined && op.id) {
@@ -342,11 +350,23 @@ export class TreeBuilder {
           url: op.url,
           index: op.index
         });
+
+        if (op.id) {
+          const created = await this.bookmarkTree.getNode(op.id);
+          if (created && 'orderKey' in created) {
+            op.orderKey = (created as BookmarkTreeNode).orderKey;
+          }
+        }
         break;
       }
       case "move_node":
       case "move_item_to_folder": {
         await this.bookmarkTree.move({ nodeId: op.nodeId, toFolderId: op.toFolderId, index: op.index });
+        // Capture new orderKey after local move
+        const moved = await this.bookmarkTree.getNode(op.nodeId);
+        if (moved && 'orderKey' in moved) {
+          op.orderKey = (moved as BookmarkTreeNode).orderKey;
+        }
         break;
       }
       case "reorder": {
@@ -361,10 +381,7 @@ export class TreeBuilder {
         await this.bookmarkTree.closeFolder(op.folderId);
         break;
       }
-      case "toggle_folder": {
-        await this.bookmarkTree.toggleFolder(op.folderId, op.open);
-        break;
-      }
+  // toggle_folder removed - use open_folder / close_folder explicitly
       case "remove_node": {
         await this.bookmarkTree.remove(op.nodeId);
         break;

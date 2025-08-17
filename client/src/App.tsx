@@ -1,6 +1,6 @@
 import BookmarkTreeView from "@/components/BookmarkTreeView";
 import { ServerSyncStatus } from "@/components/ServerSyncStatus";
-import NamespaceOnboarding from "@/components/NamespaceOnboarding";
+// import NamespaceOnboarding from "@/components/NamespaceOnboarding";
 
 function App() {
   return (
@@ -9,9 +9,9 @@ function App() {
         <h1 className="text-2xl font-bold text-center mb-8">Multi-Tab Sync Demo</h1>
 
         {/* Namespace selection */}
-        <div className="mb-6">
+        {/* <div className="mb-6">
           <NamespaceOnboarding />
-        </div>
+        </div> */}
 
         {/* Server Sync Status */}
         <div className="space-y-2">

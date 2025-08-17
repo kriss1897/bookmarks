@@ -10,7 +10,8 @@ export type EventType =
   | 'folder_updated'
   | 'folder_deleted'
   | 'item_moved'
-  | 'folder_toggled';
+  | 'open_folder'
+  | 'close_folder';
 
 export interface ServerEvent {
   id: string;

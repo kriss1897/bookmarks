@@ -290,14 +290,15 @@ export class BookmarkService {
   }
 
   // Sync operations
-  async createSnapshot(): Promise<void> {
-    const tree = await this.getSerializedTree();
+  async createSnapshot(namespace: string): Promise<void> {
+    const tree = await this.getSerializedTree(namespace);
     if (!tree) {
       throw new Error('No tree data to snapshot');
     }
 
     await this.repository.createSnapshot({
       id: `snapshot-${Date.now()}`,
+      namespace,
       rootId: tree.rootId,
       data: JSON.stringify(tree),
       timestamp: new Date(),
@@ -305,8 +306,8 @@ export class BookmarkService {
     });
   }
 
-  async getLatestSnapshot() {
-    return await this.repository.getLatestSnapshot();
+  async getLatestSnapshot(namespace: string) {
+    return await this.repository.getLatestSnapshot(namespace);
   }
 
   // Utility methods
@@ -316,7 +317,7 @@ export class BookmarkService {
     totalFolders: number;
     totalOperations: number;
   }> {
-    const allNodes = await this.repository.getAllNodes();
+  const allNodes = await this.repository.getAllNodes();
     const operations = await this.repository.getOperations(1000);
 
     return {
@@ -329,5 +330,149 @@ export class BookmarkService {
 
   async getAllNamespaces(): Promise<Array<{ namespace: string; rootNodeId: string; rootNodeTitle: string }>> {
     return await this.repository.getAllNamespaces();
+  }
+
+  // Apply operation envelope coming from client
+  async applyOperationEnvelope(namespace: string, envelope: {
+    id: string;
+    ts: number;
+    op: { type: string; [k: string]: any };
+  }): Promise<{ success: boolean; operationId: string; message?: string; error?: string; data?: any }>{
+    // Idempotency: if operation already exists, return success
+    const existing = await this.repository.getOperationById(envelope.id);
+    if (existing) {
+      return {
+        success: true,
+        operationId: envelope.id,
+        message: 'Operation already applied'
+      };
+    }
+
+    const type = envelope.op.type;
+    try {
+      let data: any = null;
+      switch (type) {
+        case 'create_folder': {
+          const { id, parentId = null, title, isOpen = true, index, orderKey } = envelope.op;
+          data = await this.createFolder(namespace, {
+            id,
+            parentId,
+            orderKey: orderKey || undefined,
+          }, {
+            title,
+            isOpen
+          });
+          break;
+        }
+        case 'create_bookmark': {
+          const { id, parentId = null, title, url, index, orderKey, description, favicon } = envelope.op;
+          data = await this.createBookmark(namespace, {
+            id,
+            parentId,
+            orderKey: orderKey || undefined,
+          }, {
+            title,
+            url,
+            description,
+            favicon
+          });
+          break;
+        }
+        case 'move_node':
+        case 'move_item_to_folder': {
+          const { nodeId, toFolderId, index, orderKey } = envelope.op;
+          data = await this.moveNode(namespace, nodeId, toFolderId || null, orderKey);
+          break;
+        }
+        case 'reorder': {
+          // Reorder can be represented as move operations; requires fromIndex/toIndex mapping to orderKey
+          // For now, no-op as orderKey must come from client; return success
+          data = { skipped: true };
+          break;
+        }
+        case 'open_folder':
+        case 'close_folder': {
+          const folderId = (type === 'open_folder' || type === 'close_folder') ? envelope.op.folderId : undefined;
+
+          if (!folderId) {
+            throw new Error('folderId is required for folder open/close operations');
+          }
+
+          const isOpen = type === 'open_folder';
+          data = await this.updateNode(namespace, folderId, {}, { isOpen });
+          break;
+        }
+        case 'remove_node': {
+          const { nodeId } = envelope.op;
+          const ok = await this.deleteNode(namespace, nodeId);
+          data = { deleted: ok };
+          break;
+        }
+        case 'mark_folder_loaded':
+        case 'hydrate_node':
+        case 'mark_folder_not_loaded': {
+          // Client-only state ops; ignore on server
+          data = { skipped: true };
+          break;
+        }
+        default:
+          return { success: false, operationId: envelope.id, error: `Unsupported operation type: ${type}` };
+      }
+
+      // Record client-provided operation id with namespace
+      await this.repository.createOperation({
+        id: envelope.id,
+        namespace,
+        type: this.mapOpTypeToDbType(type),
+        nodeId: this.extractNodeIdFromOp(envelope.op),
+        data: JSON.stringify(envelope.op),
+        timestamp: new Date(envelope.ts),
+        deviceId: 'client',
+        sessionId: 'client-sync'
+      });
+
+      return { success: true, operationId: envelope.id, message: 'Operation applied', data };
+    } catch (err: any) {
+      return { success: false, operationId: envelope.id, error: err?.message || 'Unknown error' };
+    }
+  }
+
+  private mapOpTypeToDbType(type: string): 'create' | 'update' | 'delete' | 'move' {
+    switch (type) {
+      case 'create_folder':
+      case 'create_bookmark':
+        return 'create';
+      case 'move_node':
+      case 'move_item_to_folder':
+      case 'reorder':
+        return 'move';
+      case 'remove_node':
+        return 'delete';
+  case 'open_folder':
+  case 'close_folder':
+        return 'update';
+      default:
+        return 'update';
+    }
+  }
+
+  private extractNodeIdFromOp(op: { type: string; [k: string]: any }): string {
+    switch (op.type) {
+      case 'create_folder':
+      case 'create_bookmark':
+        return op.id;
+      case 'move_node':
+      case 'move_item_to_folder':
+        return op.nodeId;
+      case 'reorder':
+        return op.folderId;
+      case 'open_folder':
+      case 'close_folder':
+        return op.folderId;
+      case 'remove_node':
+        return op.nodeId;
+      default:
+        return op.id || op.nodeId || 'unknown';
+    }
   }
 }

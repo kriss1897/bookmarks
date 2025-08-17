@@ -227,6 +227,25 @@ export class BookmarkRepository {
     return await this.getNode(node.id);
   }
 
+  async getAllNodesByNamespace(namespace: string): Promise<TreeNode[]> {
+    const nodeRows = await db.select().from(nodes).where(eq(nodes.namespace, namespace));
+    const result: TreeNode[] = [];
+    for (const node of nodeRows) {
+      const fullNode = await this.getNode(node.id, namespace);
+      if (fullNode) result.push(fullNode);
+    }
+    return result;
+  }
+
+  async getRootNodeByNamespace(namespace: string): Promise<TreeNode | null> {
+    const [node] = await db
+      .select()
+      .from(nodes)
+      .where(and(isNull(nodes.parentId), eq(nodes.namespace, namespace)));
+    if (!node) return null;
+    return await this.getNode(node.id, namespace);
+  }
+
   // Operation operations
   async createOperation(operationData: NewOperation): Promise<Operation> {
     const [operation] = await db.insert(operations).values(operationData).returning();
@@ -257,16 +276,25 @@ export class BookmarkRepository {
       .orderBy(desc(operations.timestamp));
   }
 
+  async getOperationById(operationId: string): Promise<Operation | null> {
+    const [op] = await db
+      .select()
+      .from(operations)
+      .where(eq(operations.id, operationId));
+    return op || null;
+  }
+
   // Tree snapshot operations
   async createSnapshot(snapshotData: NewTreeSnapshot): Promise<TreeSnapshot> {
     const [snapshot] = await db.insert(treeSnapshots).values(snapshotData).returning();
     return snapshot;
   }
 
-  async getLatestSnapshot(): Promise<TreeSnapshot | null> {
+  async getLatestSnapshot(namespace: string): Promise<TreeSnapshot | null> {
     const [snapshot] = await db
       .select()
       .from(treeSnapshots)
+      .where(eq(treeSnapshots.namespace, namespace))
       .orderBy(desc(treeSnapshots.timestamp))
       .limit(1);
     return snapshot || null;
@@ -281,22 +309,23 @@ export class BookmarkRepository {
   }
 
   // Sync metadata operations
-  async getSyncMetadata(deviceId: string): Promise<SyncMetadata | null> {
+  async getSyncMetadata(deviceId: string, namespace: string = 'default'): Promise<SyncMetadata | null> {
     const [metadata] = await db
       .select()
       .from(syncMetadata)
-      .where(eq(syncMetadata.deviceId, deviceId));
+      .where(and(eq(syncMetadata.deviceId, deviceId), eq(syncMetadata.namespace, namespace)));
     return metadata || null;
   }
 
-  async updateSyncMetadata(deviceId: string, data: Partial<NewSyncMetadata>): Promise<SyncMetadata> {
-    const existing = await this.getSyncMetadata(deviceId);
+  async updateSyncMetadata(deviceId: string, data: Partial<NewSyncMetadata> & { namespace?: string }): Promise<SyncMetadata> {
+    const namespace = data.namespace || 'default';
+    const existing = await this.getSyncMetadata(deviceId, namespace);
     
     if (existing) {
       const [updated] = await db
         .update(syncMetadata)
         .set(data)
-        .where(eq(syncMetadata.deviceId, deviceId))
+        .where(and(eq(syncMetadata.deviceId, deviceId), eq(syncMetadata.namespace, namespace)))
         .returning();
       return updated;
     } else {
@@ -304,7 +333,8 @@ export class BookmarkRepository {
         .insert(syncMetadata)
         .values({ 
           id: `sync-${deviceId}-${Date.now()}`,
-          deviceId, 
+          deviceId,
+          namespace,
           ...data 
         })
         .returning();
@@ -313,9 +343,9 @@ export class BookmarkRepository {
   }
 
   // Utility methods
-  async buildSerializedTree(): Promise<{ rootId: string; nodes: Record<string, any> } | null> {
-    const allNodes = await this.getAllNodes();
-    const rootNode = await this.getRootNode();
+  async buildSerializedTree(namespace?: string): Promise<{ rootId: string; nodes: Record<string, any> } | null> {
+    const allNodes = namespace ? await this.getAllNodesByNamespace(namespace) : await this.getAllNodes();
+    const rootNode = namespace ? await this.getRootNodeByNamespace(namespace) : await this.getRootNode();
     
     if (!rootNode || allNodes.length === 0) {
       return null;
@@ -323,7 +353,7 @@ export class BookmarkRepository {
 
     const nodeMap: Record<string, any> = {};
     
-    for (const node of allNodes) {
+  for (const node of allNodes) {
       nodeMap[node.id] = {
         id: node.id,
         parentId: node.parentId,
@@ -341,7 +371,7 @@ export class BookmarkRepository {
       };
     }
 
-    return {
+  return {
       rootId: rootNode.id,
       nodes: nodeMap,
     };
@@ -354,13 +384,15 @@ export class BookmarkRepository {
       return; // Data already exists
     }
 
-    const now = new Date();
+  const now = new Date();
+  const namespace = 'default';
     
     // Create root folder
     const rootFolder = await this.createFolder(
       {
         id: 'root',
         parentId: null,
+        namespace,
         createdAt: now,
         updatedAt: now,
         orderKey: '0',
@@ -377,6 +409,7 @@ export class BookmarkRepository {
       {
         id: 'folder-1',
         parentId: 'root',
+        namespace,
         createdAt: now,
         updatedAt: now,
         orderKey: '1',
@@ -393,6 +426,7 @@ export class BookmarkRepository {
       {
         id: 'folder-2',
         parentId: 'root',
+        namespace,
         createdAt: now,
         updatedAt: now,
         orderKey: '2',
@@ -409,6 +443,7 @@ export class BookmarkRepository {
       {
         id: 'bookmark-1',
         parentId: 'root',
+        namespace,
         createdAt: now,
         updatedAt: now,
         orderKey: '3',
@@ -424,6 +459,7 @@ export class BookmarkRepository {
       {
         id: 'bookmark-2',
         parentId: 'folder-1',
+        namespace,
         createdAt: now,
         updatedAt: now,
         orderKey: '1',
@@ -439,6 +475,7 @@ export class BookmarkRepository {
       {
         id: 'bookmark-3',
         parentId: 'folder-1',
+        namespace,
         createdAt: now,
         updatedAt: now,
         orderKey: '2',
@@ -454,6 +491,7 @@ export class BookmarkRepository {
       {
         id: 'bookmark-4',
         parentId: 'folder-2',
+        namespace,
         createdAt: now,
         updatedAt: now,
         orderKey: '1',
@@ -469,6 +507,7 @@ export class BookmarkRepository {
     const sampleNodes = [rootFolder, devFolder, designFolder, githubBookmark, mdnBookmark, stackoverflowBookmark, figmaBookmark];
     const createOperations: NewOperation[] = sampleNodes.map(node => ({
       id: `op-create-${node.id}`,
+      namespace,
       type: 'create',
       nodeId: node.id,
       data: JSON.stringify(node),

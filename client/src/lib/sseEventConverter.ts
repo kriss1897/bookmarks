@@ -70,11 +70,18 @@ export function convertServerEventToOperation(event: ServerEvent): TreeOperation
           index: data.index as number
         };
 
-      case 'folder_toggled':
+  // folder_toggled event removed; server now emits explicit open_folder/close_folder
+
+      case 'open_folder':
         return {
-          type: 'toggle_folder',
-          folderId: data.id as string,
-          open: data.isOpen as boolean
+          type: 'open_folder',
+          folderId: data.id as string
+        };
+
+      case 'close_folder':
+        return {
+          type: 'close_folder',
+          folderId: data.id as string
         };
 
       default:
@@ -158,7 +165,6 @@ export function validateServerEventData(event: ServerEvent): boolean {
 
       case 'bookmark_deleted':
       case 'folder_deleted':
-      case 'folder_toggled':
         // Only need ID for these operations
         return true;
 

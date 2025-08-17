@@ -138,12 +138,10 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
       updatedAt: now,
     };
 
-    // Set order key based on position
-    if (params.index !== undefined) {
-      const siblings = await this.getChildren(parentId);
-      const [leftId, rightId] = this.getNeighborIdsAtIndex(siblings, params.index);
-      folder.orderKey = this.generateOrderKey(leftId, rightId);
-    }
+  // Always set order key based on position (append if index is undefined)
+  const siblings = await this.getChildren(parentId);
+  const [leftId, rightId] = this.getNeighborIdsAtIndex(siblings, params.index);
+  folder.orderKey = this.generateOrderKey(leftId, rightId);
 
     await this.setNode(folder);
     await this.updateParentChildren(parentId);
@@ -178,12 +176,10 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
       updatedAt: now,
     };
 
-    // Set order key based on position
-    if (params.index !== undefined) {
-      const siblings = await this.getChildren(parentId);
-      const [leftId, rightId] = this.getNeighborIdsAtIndex(siblings, params.index);
-      bookmark.orderKey = this.generateOrderKey(leftId, rightId);
-    }
+  // Always set order key based on position (append if index is undefined)
+  const siblings = await this.getChildren(parentId);
+  const [leftId, rightId] = this.getNeighborIdsAtIndex(siblings, params.index);
+  bookmark.orderKey = this.generateOrderKey(leftId, rightId);
 
     await this.setNode(bookmark);
     await this.updateParentChildren(parentId);
