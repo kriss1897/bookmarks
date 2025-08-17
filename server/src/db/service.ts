@@ -221,12 +221,17 @@ export class BookmarkService {
     
     // Recursive function to load children for open folders
     const loadNodeAndChildren = async (node: TreeNode): Promise<void> => {
-      // Add current node to the result
+      // Get direct children first
+      const children = await this.repository.getNodesByParent(node.id, namespace);
+      const childrenIds = children.map(child => child.id);
+      
+      // Add current node to the result with children array
       nodes[node.id] = {
         id: node.id,
         parentId: node.parentId,
         kind: node.kind,
         title: node.title,
+        children: childrenIds, // Array of ALL child node IDs
         ...(node.kind === 'bookmark' && { 
           url: node.url,
           description: node.description,
@@ -238,7 +243,7 @@ export class BookmarkService {
         orderKey: node.orderKey,
       };
 
-      // Only load children if:
+      // Only load children recursively if:
       // 1. This is not a folder (bookmarks don't have children anyway), OR
       // 2. This is a folder and it's open, OR  
       // 3. This is the root node we're starting from
@@ -248,10 +253,7 @@ export class BookmarkService {
         node.id === nodeId;
 
       if (shouldLoadChildren) {
-        // Get direct children
-        const children = await this.repository.getNodesByParent(node.id, namespace);
-        
-        // Process each child recursively
+        // Process each child recursively (this will add them to nodes object)
         for (const child of children) {
           await loadNodeAndChildren(child);
         }
@@ -323,5 +325,9 @@ export class BookmarkService {
       totalFolders: allNodes.filter(n => n.kind === 'folder').length,
       totalOperations: operations.length,
     };
+  }
+
+  async getAllNamespaces(): Promise<Array<{ namespace: string; rootNodeId: string; rootNodeTitle: string }>> {
+    return await this.repository.getAllNamespaces();
   }
 }

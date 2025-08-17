@@ -479,4 +479,29 @@ export class BookmarkRepository {
 
     await db.insert(operations).values(createOperations);
   }
+
+  // Get all namespaces and their root nodes
+  async getAllNamespaces(): Promise<Array<{ namespace: string; rootNodeId: string; rootNodeTitle: string }>> {
+    const result = await db
+      .select({
+        namespace: nodes.namespace,
+        rootNodeId: nodes.id,
+        rootNodeTitle: folders.title
+      })
+      .from(nodes)
+      .leftJoin(folders, eq(nodes.id, folders.nodeId))
+      .where(
+        and(
+          isNull(nodes.parentId), // Root nodes have null parent
+          eq(nodes.kind, 'folder') // Root nodes are typically folders
+        )
+      )
+      .orderBy(nodes.namespace);
+
+    return result.map(row => ({
+      namespace: row.namespace,
+      rootNodeId: row.rootNodeId,
+      rootNodeTitle: row.rootNodeTitle || 'Untitled Root'
+    }));
+  }
 }

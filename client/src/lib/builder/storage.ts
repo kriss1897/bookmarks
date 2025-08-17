@@ -105,7 +105,11 @@ export class IndexedDBOperationStorage extends OperationStorage {
 
   async loadOperations(): Promise<OperationEnvelope[]> {
     try {
+      console.log('Start loading operations');
+
       const storedOperations = await this.databaseService.loadOperationLog();
+
+      console.log('Loaded operations from storage', storedOperations);
       // Convert stored operations back to OperationEnvelope format
       return storedOperations.map((stored: StoredOperation) => ({
         id: stored.id,

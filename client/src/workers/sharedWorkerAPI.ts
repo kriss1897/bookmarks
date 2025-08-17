@@ -60,6 +60,8 @@ export type BroadcastMessage =
   | { type: 'server_event_error'; error: string; event: ServerEvent }
   | { type: 'sse_state_changed'; state: SSEConnectionState }
   | { type: 'hydrate_node'; nodeId: NodeId; nodeData: TreeNode; children: TreeNode[] }
+  | { type: 'root_hydrated'; nodeId: NodeId; timestamp: number }
+  | { type: 'root_hydration_failed'; error: string; timestamp: number }
   | { type: 'sync_status_changed'; isSyncing: boolean; pendingCount?: number; failedCount?: number }
   | { type: 'operation_sync_completed'; operationId: string; success: boolean; error?: string };
 

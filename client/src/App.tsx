@@ -1,4 +1,4 @@
-import { SharedWorkerOperationsTree } from "@/components/SharedWorkerOperationsTree";
+import BookmarkTreeView from "@/components/BookmarkTreeView";
 import { ServerSyncStatus } from "@/components/ServerSyncStatus";
 
 function App() {
@@ -14,11 +14,11 @@ function App() {
           <ServerSyncStatus />
         </div>
 
-        {/* Operations-based SharedWorker Version */}
+        {/* Snapshot-based SharedWorker Version (no SSE state exposed) */}
         <div className="space-y-2">
-          <h2 className="text-lg font-semibold">SharedWorker Operations Tree (Fixed Anti-Loop)</h2>
-          <p className="text-sm text-muted-foreground">Uses operations log from SharedWorker, prevents feedback loops</p>
-          <SharedWorkerOperationsTree />
+          <h2 className="text-lg font-semibold">Bookmark Tree View (Snapshot)</h2>
+          <p className="text-sm text-muted-foreground">Renders from worker snapshots and refreshes on broadcasts</p>
+          <BookmarkTreeView />
         </div>
       </div>
     </div>

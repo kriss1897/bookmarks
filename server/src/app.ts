@@ -45,6 +45,26 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
+// Get all namespaces and their root nodes
+app.get('/api/namespaces', async (req: Request, res: Response) => {
+  try {
+    const namespaces = await bookmarkService.getAllNamespaces();
+    
+    res.json({
+      success: true,
+      data: namespaces,
+      message: 'Namespaces retrieved successfully'
+    });
+  } catch (error) {
+    console.error('Error fetching namespaces:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // Get initial tree from database
 app.get('/api/:namespace/tree/initial', async (req: Request, res: Response) => {
   try {
@@ -77,6 +97,9 @@ app.get('/api/:namespace/tree/initial', async (req: Request, res: Response) => {
 app.get('/api/:namespace/tree/node/:nodeId', async (req: Request, res: Response) => {
   try {
     const { namespace, nodeId } = req.params;
+
+    console.log({ namespace, nodeId });
+
     const tree = await bookmarkService.getNodeWithChildren(namespace, nodeId);
     
     if (!tree) {
