@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize SQLite database
-const dbPath = path.resolve(__dirname, '../../data/bookmarks.db');
+const dbPath = path.resolve(__dirname, '../../../bookmarks.db');
 const sqlite = new Database(dbPath);
 
 // Enable WAL mode for better concurrent access

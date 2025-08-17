@@ -12,12 +12,12 @@ export class BookmarkService {
   // Node service methods
   async createFolder(
     namespace: string,
-    nodeData: Partial<Pick<NewNode, 'id'>> & Omit<NewNode, 'id' | 'kind' | 'createdAt' | 'updatedAt' | 'namespace'>, 
+    nodeData: Partial<Pick<NewNode, 'id'>> & Omit<NewNode, 'id' | 'kind' | 'createdAt' | 'updatedAt' | 'namespace'>,
     folderData: Omit<NewFolder, 'nodeId'>
   ): Promise<TreeNode> {
     const now = new Date();
     const id = nodeData.id || `folder-${uuidv4()}`;
-    
+
     const node = await this.repository.createFolder(
       {
         ...nodeData,
@@ -31,7 +31,7 @@ export class BookmarkService {
         nodeId: id,
       }
     );
-    
+
     // Record the operation
     await this.recordOperation({
       id: `op-create-${node.id}-${now.getTime()}`,
@@ -49,12 +49,12 @@ export class BookmarkService {
 
   async createBookmark(
     namespace: string,
-    nodeData: Partial<Pick<NewNode, 'id'>> & Omit<NewNode, 'id' | 'kind' | 'createdAt' | 'updatedAt' | 'namespace'>, 
+    nodeData: Partial<Pick<NewNode, 'id'>> & Omit<NewNode, 'id' | 'kind' | 'createdAt' | 'updatedAt' | 'namespace'>,
     bookmarkData: Omit<NewBookmark, 'nodeId'>
   ): Promise<TreeNode> {
     const now = new Date();
     const id = nodeData.id || `bookmark-${uuidv4()}`;
-    
+
     const node = await this.repository.createBookmark(
       {
         ...nodeData,
@@ -68,7 +68,7 @@ export class BookmarkService {
         nodeId: id,
       }
     );
-    
+
     // Record the operation
     await this.recordOperation({
       id: `op-create-${node.id}-${now.getTime()}`,
@@ -86,7 +86,7 @@ export class BookmarkService {
 
   async updateNode(
     namespace: string,
-    id: string, 
+    id: string,
     nodeUpdates: Partial<Omit<NewNode, 'id' | 'createdAt' | 'updatedAt'>>,
     specificUpdates: any = {}
   ): Promise<TreeNode | null> {
@@ -129,14 +129,14 @@ export class BookmarkService {
 
     // Get all child nodes first
     const children = await this.getNodeChildren(namespace, id);
-    
+
     // Delete all children recursively
     for (const child of children) {
       await this.deleteNode(namespace, child.id);
     }
 
     const deleted = await this.repository.deleteNode(id);
-    
+
     if (deleted) {
       const now = new Date();
       // Record the operation
@@ -176,7 +176,7 @@ export class BookmarkService {
 
     const previousParentId = node.parentId;
     const now = new Date();
-    
+
     const updatedNode = await this.repository.updateFolder(nodeId, {
       parentId: newParentId,
       orderKey: orderKey || node.orderKey,
@@ -218,13 +218,13 @@ export class BookmarkService {
     }
 
     const nodes: Record<string, any> = {};
-    
+
     // Recursive function to load children for open folders
     const loadNodeAndChildren = async (node: TreeNode): Promise<void> => {
       // Get direct children first
       const children = await this.repository.getNodesByParent(node.id, namespace);
       const childrenIds = children.map(child => child.id);
-      
+
       // Add current node to the result with children array
       nodes[node.id] = {
         id: node.id,
@@ -232,10 +232,10 @@ export class BookmarkService {
         kind: node.kind,
         title: node.title,
         children: childrenIds, // Array of ALL child node IDs
-        ...(node.kind === 'bookmark' && { 
+        ...(node.kind === 'bookmark' && {
           url: node.url,
           description: node.description,
-          favicon: node.favicon 
+          favicon: node.favicon
         }),
         ...(node.kind === 'folder' && { isOpen: node.isOpen }),
         createdAt: node.createdAt.getTime(),
@@ -247,9 +247,9 @@ export class BookmarkService {
       // 1. This is not a folder (bookmarks don't have children anyway), OR
       // 2. This is a folder and it's open, OR  
       // 3. This is the root node we're starting from
-      const shouldLoadChildren = 
-        node.kind !== 'folder' || 
-        (node.kind === 'folder' && node.isOpen === true) || 
+      const shouldLoadChildren =
+        node.kind !== 'folder' ||
+        (node.kind === 'folder' && node.isOpen === true) ||
         node.id === nodeId;
 
       if (shouldLoadChildren) {
@@ -317,7 +317,7 @@ export class BookmarkService {
     totalFolders: number;
     totalOperations: number;
   }> {
-  const allNodes = await this.repository.getAllNodes();
+    const allNodes = await this.repository.getAllNodes();
     const operations = await this.repository.getOperations(1000);
 
     return {
@@ -336,8 +336,8 @@ export class BookmarkService {
   async applyOperationEnvelope(namespace: string, envelope: {
     id: string;
     ts: number;
-    op: { type: string; [k: string]: any };
-  }): Promise<{ success: boolean; operationId: string; message?: string; error?: string; data?: any }>{
+    op: { type: string;[k: string]: any };
+  }): Promise<{ success: boolean; operationId: string; message?: string; error?: string; data?: any }> {
     // Idempotency: if operation already exists, return success
     const existing = await this.repository.getOperationById(envelope.id);
     if (existing) {
@@ -384,10 +384,18 @@ export class BookmarkService {
           data = await this.moveNode(namespace, nodeId, toFolderId || null, orderKey);
           break;
         }
-        case 'reorder': {
-          // Reorder can be represented as move operations; requires fromIndex/toIndex mapping to orderKey
-          // For now, no-op as orderKey must come from client; return success
-          data = { skipped: true };
+        case 'update_node': {
+          const { nodeId, parentId, orderKey } = envelope.op as any;
+          if (!nodeId) throw new Error('update_node: nodeId is required');
+          const existing = await this.repository.getNode(nodeId, namespace);
+          if (!existing) throw new Error(`Node not found: ${nodeId}`);
+          const nodeUpdates: Partial<any> = {};
+          if (parentId !== undefined) nodeUpdates.parentId = parentId;
+          if (orderKey !== undefined) nodeUpdates.orderKey = orderKey;
+          const updated = existing.kind === 'folder'
+            ? await this.repository.updateFolder(nodeId, nodeUpdates, {})
+            : await this.repository.updateBookmark(nodeId, nodeUpdates, {});
+          data = { nodeId, parentId: updated?.parentId, orderKey: updated?.orderKey };
           break;
         }
         case 'open_folder':
@@ -446,17 +454,18 @@ export class BookmarkService {
       case 'move_item_to_folder':
       case 'reorder':
         return 'move';
+      case 'update_node':
       case 'remove_node':
         return 'delete';
-  case 'open_folder':
-  case 'close_folder':
+      case 'open_folder':
+      case 'close_folder':
         return 'update';
       default:
         return 'update';
     }
   }
 
-  private extractNodeIdFromOp(op: { type: string; [k: string]: any }): string {
+  private extractNodeIdFromOp(op: { type: string;[k: string]: any }): string {
     switch (op.type) {
       case 'create_folder':
       case 'create_bookmark':
@@ -465,7 +474,9 @@ export class BookmarkService {
       case 'move_item_to_folder':
         return op.nodeId;
       case 'reorder':
-        return op.folderId;
+        return (op as any).nodeId || (op as any).folderId;
+      case 'update_node':
+        return (op as any).nodeId;
       case 'open_folder':
       case 'close_folder':
         return op.folderId;

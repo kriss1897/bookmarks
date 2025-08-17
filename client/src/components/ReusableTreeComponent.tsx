@@ -664,8 +664,6 @@ function formatOp(env: { id: string; op: TreeOperation }): string {
     case "move_node":
     case "move_item_to_folder":
       return `${op.type}(id=${op.nodeId} -> ${op.toFolderId}${typeof op.index === "number" ? ", index=" + op.index : ""})`;
-    case "reorder":
-      return `reorder(folder=${op.folderId}, ${op.fromIndex} -> ${op.toIndex})`;
     case "open_folder":
       return `open_folder(${op.folderId})`;
     case "close_folder":

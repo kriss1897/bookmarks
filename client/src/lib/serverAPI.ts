@@ -189,9 +189,13 @@ export class ServerAPI {
       return {
         ...baseNode,
         kind: 'folder',
-        isOpen: (serverNode.isOpen as boolean) || false,
-        isLoaded: true, // Since we got it from server, it's loaded
-        children: [] // Will be populated by parent processing
+  isOpen: (serverNode.isOpen as boolean) || false,
+  // Important: non-root folders included in another node's payload should NOT be marked loaded,
+  // otherwise opening them won't trigger hydration. We'll mark only the main fetched node as loaded
+  // via nodeData in fetchNodeWithChildren().
+  isLoaded: false,
+  // Children for non-root nodes will be populated on dedicated hydration for that node
+  children: []
       };
     } else {
       return {

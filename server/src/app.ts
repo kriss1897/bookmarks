@@ -106,19 +106,6 @@ app.get('/api/:namespace/tree/node/:nodeId', async (req: Request, res: Response)
 
       // if it does not exist, create a root node
       if (!root) {
-        await bookmarkService.createFolder(
-          namespace,
-          {
-            id: 'root',
-            parentId: null,
-            orderKey: null,
-          },
-          {
-            title: namespace,
-            isOpen: true,
-          }
-        );
-
         // and create a root folder as well
         await bookmarkService.createFolder(
           namespace,

@@ -25,8 +25,7 @@ interface UseBookmarkTreeSnapshotReturn {
   createFolder: (params: { parentId?: NodeId; title: string; isOpen?: boolean; isLoaded?: boolean; index?: number }) => Promise<NodeId | undefined>;
   createBookmark: (params: { parentId?: NodeId; title: string; url: string; index?: number }) => Promise<NodeId | undefined>;
   removeNode: (nodeId: NodeId) => Promise<void>;
-  moveNode: (params: { nodeId: NodeId; toFolderId: NodeId; index?: number }) => Promise<void>;
-  reorderNodes: (params: { folderId: NodeId; fromIndex: number; toIndex: number }) => Promise<void>;
+  updateNode: (params: { nodeId: NodeId; parentId?: NodeId | null; orderKey?: string }) => Promise<void>;
   toggleFolder: (folderId: NodeId, open?: boolean) => Promise<void>;
 }
 
@@ -127,12 +126,8 @@ export const useBookmarkTreeSnapshot = (): UseBookmarkTreeSnapshotReturn => {
     await withWorker(() => workerProxy!.removeNode(nodeId), 'removeNode');
   }, [withWorker, workerProxy]);
 
-  const moveNode = useCallback<UseBookmarkTreeSnapshotReturn['moveNode']>(async (params) => {
-    await withWorker(() => workerProxy!.moveNode(params), 'moveNode');
-  }, [withWorker, workerProxy]);
-
-  const reorderNodes = useCallback<UseBookmarkTreeSnapshotReturn['reorderNodes']>(async (params) => {
-    await withWorker(() => workerProxy!.reorderNodes(params), 'reorderNodes');
+  const updateNode = useCallback<UseBookmarkTreeSnapshotReturn['updateNode']>(async (params) => {
+    await withWorker(() => workerProxy!.updateNode(params), 'updateNode');
   }, [withWorker, workerProxy]);
 
   const toggleFolder = useCallback<UseBookmarkTreeSnapshotReturn['toggleFolder']>(async (folderId, open) => {
@@ -149,8 +144,7 @@ export const useBookmarkTreeSnapshot = (): UseBookmarkTreeSnapshotReturn => {
     createFolder,
     createBookmark,
     removeNode,
-    moveNode,
-    reorderNodes,
+    updateNode,
     toggleFolder
   };
 };

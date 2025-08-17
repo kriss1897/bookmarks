@@ -13,8 +13,7 @@ export interface SharedWorkerAPI {
   createFolder(params: { parentId?: NodeId; title: string; id?: NodeId; isOpen?: boolean; isLoaded?: boolean; index?: number }): Promise<NodeId>;
   createBookmark(params: { parentId?: NodeId; title: string; url: string; id?: NodeId; index?: number }): Promise<NodeId>;
   removeNode(nodeId: NodeId): Promise<void>;
-  moveNode(params: { nodeId: NodeId; toFolderId: NodeId; index?: number }): Promise<void>;
-  reorderNodes(params: { folderId: NodeId; fromIndex: number; toIndex: number }): Promise<void>;
+  updateNode(params: { nodeId: NodeId; parentId?: NodeId | null; orderKey?: string }): Promise<void>;
   toggleFolder(folderId: NodeId, open?: boolean): Promise<void>;
   loadFolderData(folderId: NodeId): Promise<void>;
   

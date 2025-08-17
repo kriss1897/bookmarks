@@ -37,11 +37,27 @@ export type MoveNodeOp = {
   orderKey?: string; // client-generated fractional key to send to server
 };
 
+// Unified node update op for parent/orderKey changes
+export type UpdateNodeOp = {
+  type: "update_node";
+  nodeId: NodeId;
+  parentId?: NodeId | null;
+  orderKey?: string;
+};
+
+// Reorder operation
+// Legacy: fromIndex/toIndex were used to compute a new fractional order key.
+// New: capture precise change using oldOrderKey/newOrderKey (and nodeId) for server sync.
 export type ReorderOp = {
   type: "reorder";
   folderId: NodeId;
-  fromIndex: number;
-  toIndex: number;
+  // legacy fields (still accepted locally)
+  fromIndex?: number;
+  toIndex?: number;
+  // new fields preferred for syncing
+  nodeId?: NodeId;
+  oldOrderKey?: string;
+  newOrderKey?: string;
 };
 
 export type OpenFolderOp = { type: "open_folder"; folderId: NodeId };
@@ -62,6 +78,7 @@ export type TreeOperation =
   | CreateFolderOp
   | CreateBookmarkOp
   | MoveNodeOp
+  | UpdateNodeOp
   | ReorderOp
   | OpenFolderOp
   | CloseFolderOp
@@ -276,6 +293,9 @@ export class TreeBuilder {
   moveItemToFolder(op: Omit<MoveNodeOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "move_item_to_folder", ...op });
   }
+  updateNode(op: Omit<UpdateNodeOp, "type">): Promise<OperationEnvelope> {
+    return this.dispatch({ type: "update_node", ...op });
+  }
   reorder(op: Omit<ReorderOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "reorder", ...op });
   }
@@ -359,18 +379,48 @@ export class TreeBuilder {
         }
         break;
       }
-      case "move_node":
-      case "move_item_to_folder": {
-        await this.bookmarkTree.move({ nodeId: op.nodeId, toFolderId: op.toFolderId, index: op.index });
-        // Capture new orderKey after local move
-        const moved = await this.bookmarkTree.getNode(op.nodeId);
-        if (moved && 'orderKey' in moved) {
-          op.orderKey = (moved as BookmarkTreeNode).orderKey;
+      // case "move_node":
+      // case "move_item_to_folder": {
+      //   await this.bookmarkTree.move({ nodeId: op.nodeId, toFolderId: op.toFolderId, index: op.index });
+      //   // Capture new orderKey after local move
+      //   const moved = await this.bookmarkTree.getNode(op.nodeId);
+      //   if (moved && 'orderKey' in moved) {
+      //     op.orderKey = (moved as BookmarkTreeNode).orderKey;
+      //   }
+      //   break;
+      // }
+      case "update_node": {
+        const current = await this.bookmarkTree.getNode(op.nodeId);
+        if (!current) {
+          throw new Error(`update_node: node not found ${op.nodeId}`);
         }
-        break;
-      }
-      case "reorder": {
-        await this.bookmarkTree.reorder({ folderId: op.folderId, fromIndex: op.fromIndex, toIndex: op.toIndex });
+        const oldParentId = current.parentId || null;
+        const newParentId = op.parentId !== undefined ? op.parentId : oldParentId;
+        const updated: BookmarkTreeNode = { ...(current as BookmarkTreeNode) } as BookmarkTreeNode;
+        if (op.parentId !== undefined) {
+          updated.parentId = (newParentId ?? null) as string | null;
+        }
+        if (op.orderKey !== undefined) {
+          (updated as unknown as { orderKey?: string }).orderKey = op.orderKey;
+        }
+        await this.bookmarkTree.setNode(updated);
+        // Refresh children arrays for affected parents
+        if (oldParentId && oldParentId !== newParentId) {
+          const oldFolder = await this.bookmarkTree.getNode(oldParentId);
+          if (oldFolder && (oldFolder as BookmarkTreeNode).kind === 'folder') {
+            const ch = await this.bookmarkTree.getChildren(oldParentId);
+            await this.bookmarkTree.setNode({ ...(oldFolder as BookmarkTreeNode), children: ch.map(c => c.id) } as BookmarkTreeNode);
+          }
+        }
+
+        if (newParentId) {
+          const newFolder = await this.bookmarkTree.getNode(newParentId);
+        
+          if (newFolder && (newFolder as BookmarkTreeNode).kind === 'folder') {
+            const ch = await this.bookmarkTree.getChildren(newParentId);
+            await this.bookmarkTree.setNode({ ...(newFolder as BookmarkTreeNode), children: ch.map(c => c.id) } as BookmarkTreeNode);
+          }
+        }
         break;
       }
       case "open_folder": {
@@ -409,16 +459,24 @@ export class TreeBuilder {
           await this.bookmarkTree.setNode(updatedNode);
         }
 
-        // Update the parent-child relationship for the hydrated folder
-        if (currentNode?.kind === 'folder') {
-          // Mark the folder as loaded
-          await this.bookmarkTree.markFolderAsLoaded(op.nodeId);
-        }
-
-        // Then add all children
+        // Then add all children and rebuild direct children list for this folder
+        const directChildIds: string[] = [];
         for (const childData of op.children) {
           const childNode = childData as unknown as BookmarkTreeNode;
           await this.bookmarkTree.setNode(childNode);
+          if (childNode.parentId === op.nodeId) {
+            directChildIds.push(childNode.id);
+          }
+        }
+
+        // Update the parent-child relationship for the hydrated folder and mark as loaded
+        if (currentNode?.kind === 'folder') {
+          // set children gathered above if any
+          const refreshed = await this.bookmarkTree.getNode(op.nodeId) as BookmarkTreeNode | undefined;
+          if (refreshed && 'children' in refreshed) {
+            await this.bookmarkTree.setNode({ ...refreshed, children: directChildIds } as BookmarkTreeNode);
+          }
+          await this.bookmarkTree.markFolderAsLoaded(op.nodeId);
         }
 
         break;

@@ -11,6 +11,7 @@ import { ReusableTreeComponent, type TreeOperations, type TreeState } from './Re
 import { Button } from './ui/button';
 import { isFolder, type BookmarkTreeNode } from '@/lib/tree/BookmarkTree';
 import { useNamespace } from '@/hooks/useNamespace';
+import { generateKeyBetween } from 'fractional-indexing';
 
 export const BookmarkTreeView: React.FC = () => {
   const {
@@ -23,8 +24,7 @@ export const BookmarkTreeView: React.FC = () => {
     createFolder,
     createBookmark,
     removeNode,
-    moveNode,
-    reorderNodes,
+    updateNode,
     toggleFolder
   } = useBookmarkTreeSnapshot();
 
@@ -98,16 +98,37 @@ export const BookmarkTreeView: React.FC = () => {
       const parent = nodes[parentId];
       if (!parent || !isFolder(parent)) return;
       if (index <= 0) return;
-      await reorderNodes({ folderId: parentId, fromIndex: index, toIndex: index - 1 });
+      const childId = parent.children[index];
+      const leftId = index - 2 >= 0 ? parent.children[index - 2] : null;
+      const rightId = index - 1 >= 0 ? parent.children[index - 1] : null;
+      const leftKey = leftId ? nodes[leftId]?.orderKey || null : null;
+      const rightKey = rightId ? nodes[rightId]?.orderKey || null : null;
+      const newKey = generateKeyBetween(leftKey, rightKey);
+      await updateNode({ nodeId: childId, parentId, orderKey: newKey });
     },
     moveDown: async (parentId, index) => {
       const parent = nodes[parentId];
       if (!parent || !isFolder(parent)) return;
       if (index >= parent.children.length - 1) return;
-      await reorderNodes({ folderId: parentId, fromIndex: index, toIndex: index + 1 });
+      const childId = parent.children[index];
+      const leftId = parent.children[index + 1] || null;
+      const rightId = parent.children[index + 2] || null;
+      const leftKey = leftId ? nodes[leftId]?.orderKey || null : null;
+      const rightKey = rightId ? nodes[rightId]?.orderKey || null : null;
+      const newKey = generateKeyBetween(leftKey, rightKey);
+      await updateNode({ nodeId: childId, parentId, orderKey: newKey });
     },
     moveNode: async (nodeId, targetFolderId, index) => {
-      await moveNode({ nodeId, toFolderId: targetFolderId, index });
+      const target = nodes[targetFolderId];
+      if (!target || !isFolder(target)) return;
+      const children = target.children;
+      const i = typeof index === 'number' ? Math.max(0, Math.min(index, children.length)) : children.length;
+      const leftId = i - 1 >= 0 ? children[i - 1] : null;
+      const rightId = i < children.length ? children[i] : null;
+      const leftKey = leftId ? nodes[leftId]?.orderKey || null : null;
+      const rightKey = rightId ? nodes[rightId]?.orderKey || null : null;
+      const newKey = generateKeyBetween(leftKey, rightKey);
+      await updateNode({ nodeId, parentId: targetFolderId, orderKey: newKey });
     }
   };
 
@@ -132,9 +153,8 @@ export const BookmarkTreeView: React.FC = () => {
   return (
     <div>
       <div className="mb-4 flex items-center gap-2">
-        <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs ${
-          connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-        }`}>
+        <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs ${connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+          }`}>
           <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`} />
           {connected ? 'Connected' : 'Disconnected'}
         </div>

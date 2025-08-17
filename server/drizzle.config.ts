@@ -5,7 +5,7 @@ export default {
   out: './src/db/migrations',
   dialect: 'sqlite',
   dbCredentials: {
-    url: './data/bookmarks.db',
+    url: '../bookmarks.db',
   },
   verbose: true,
   strict: true,

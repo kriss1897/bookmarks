@@ -1,0 +1,17 @@
+{
+  "name": "bookmarks",
+  "version": "1.0.0",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "npm -w server run dev",
+    "start": "npm -w server start"
+  },
+  "workspaces": ["client", "server"],
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}

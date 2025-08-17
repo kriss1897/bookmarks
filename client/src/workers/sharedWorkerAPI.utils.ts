@@ -28,10 +28,9 @@ export function createAPIProxy(api: Comlink.Remote<SharedWorkerAPI> | null | und
       apiCall(api, 'createBookmark', params),
     removeNode: (nodeId: string) => 
       apiCall(api, 'removeNode', nodeId),
-    moveNode: (params: { nodeId: string; toFolderId: string; index?: number }) => 
-      apiCall(api, 'moveNode', params),
-    reorderNodes: (params: { folderId: string; fromIndex: number; toIndex: number }) => 
-      apiCall(api, 'reorderNodes', params),
+  // move/reorder removed in favor of updateNode
+    updateNode: (params: { nodeId: string; parentId?: string | null; orderKey?: string }) =>
+      apiCall(api, 'updateNode', params),
     toggleFolder: (folderId: string, open?: boolean) => 
       apiCall(api, 'toggleFolder', folderId, open),
     getTree: () => 

@@ -452,11 +452,13 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     this.trySyncOperationImmediately(operation.id);
   }
 
-  async moveNode(params: { nodeId: NodeId; toFolderId: NodeId; index?: number }): Promise<void> {
+  // moveNode and reorderNodes removed in favor of updateNode
+
+  async updateNode(params: { nodeId: NodeId; parentId?: NodeId | null; orderKey?: string }): Promise<void> {
     await this.ensureInitialized();
 
     const operation = await this.builder.dispatch({
-      type: 'move_node',
+      type: 'update_node',
       ...params
     });
 
@@ -465,24 +467,6 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       operation
     });
 
-    // Try to sync immediately if connected
-    this.trySyncOperationImmediately(operation.id);
-  }
-
-  async reorderNodes(params: { folderId: NodeId; fromIndex: number; toIndex: number }): Promise<void> {
-    await this.ensureInitialized();
-
-    const operation = await this.builder.dispatch({
-      type: 'reorder',
-      ...params
-    });
-
-    this.broadcast({
-      type: 'operation_processed',
-      operation
-    });
-
-    // Try to sync immediately if connected
     this.trySyncOperationImmediately(operation.id);
   }
 
