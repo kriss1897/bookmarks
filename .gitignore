@@ -1,4 +1,4 @@
 .tmp
 .vscode
 
-server/data
+bookmarks.db*
