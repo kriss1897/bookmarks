@@ -29,7 +29,7 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
   // Hydration state management
   private serverBaselineTimestamp = 0; // Last known server state timestamp
-  // private pendingLocalOperations: OperationEnvelope[] = []; // Operations not yet synced to server
+  private pendingLocalOperations: OperationEnvelope[] = []; // Operations not yet synced to server
 
   constructor() {
     console.log('[SharedWorker] BookmarkSharedWorker initialized');
@@ -301,68 +301,6 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     this.sseBroadcastChannel.close();
 
     this.connections.clear();
-  }
-
-  // Namespace Management
-  public async setNamespace(namespace: string): Promise<void> {
-    await this.ensureInitialized();
-
-    if (!namespace || namespace === this.namespace) {
-      console.log('[SharedWorker] Namespace unchanged, skipping setNamespace');
-      return;
-    }
-
-    console.log(`[SharedWorker] Switching namespace from ${this.namespace} to ${namespace}`);
-
-    // 1) Disconnect SSE to stop incoming events for old namespace
-    this.disconnectSSE();
-
-    // 2) Clear local persisted data (nodes/oplog)
-    try {
-      await databaseService.clear();
-    } catch (err) {
-      console.warn('[SharedWorker] Failed to clear local DB during namespace switch:', err);
-    }
-
-    // 3) Update namespace and reconfigure ServerAPI
-    this.namespace = namespace;
-    ServerAPI.configure({ namespace: this.namespace });
-
-    // 4) Rebuild builder state with a fresh baseline for the new namespace
-    try {
-      // Try to resolve the correct root for this namespace
-      const initial = await ServerAPI.fetchInitialTree();
-      const fallbackRootId = this.builder.bookmarkTree.rootId;
-      const rootId = initial?.rootId || fallbackRootId;
-      const nodeData = initial?.node ?? (await ServerAPI.fetchNodeWithChildren(rootId)).node;
-      const children = initial?.children ?? (await ServerAPI.fetchNodeWithChildren(rootId)).children;
-
-      const baselineOperation: OperationEnvelope = {
-        id: this.generateId(),
-        ts: Date.now(),
-        op: {
-          type: 'hydrate_node',
-          nodeId: rootId,
-          nodeData: nodeData as unknown as Record<string, unknown>,
-          children: children as unknown as Record<string, unknown>[]
-        },
-        processed: true,
-        remote: true
-      };
-
-  await this.builder.initialize([baselineOperation], true);
-
-      // Inform clients that the tree has been reloaded
-      this.broadcast({ type: 'tree_reloaded', tree: await this.getTree() });
-    } catch (error) {
-      console.error('[SharedWorker] Failed to rebuild baseline on namespace switch:', error);
-      // Still proceed to reconnect SSE
-    }
-
-    // 5) Reconnect SSE for the new namespace if tabs are connected
-    if (this.connections.size > 0) {
-      await this.initializeSSE();
-    }
   }
 
   async ping(): Promise<string> {

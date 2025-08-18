@@ -10,7 +10,6 @@ import { useBookmarkTreeSnapshot } from '@/hooks/useBookmarkTreeSnapshot';
 import { ReusableTreeComponent, type TreeOperations, type TreeState } from './ReusableTreeComponent';
 import { Button } from './ui/button';
 import { isFolder, type BookmarkTreeNode } from '@/lib/tree/BookmarkTree';
-import { useNamespace } from '@/hooks/useNamespace';
 import { generateKeyBetween } from 'fractional-indexing';
 
 export const BookmarkTreeView: React.FC = () => {
@@ -30,7 +29,6 @@ export const BookmarkTreeView: React.FC = () => {
 
   const nodes = (tree?.nodes ?? {}) as Record<string, BookmarkTreeNode>;
   const rootId = tree?.rootId ?? 'root';
-  const { selected } = useNamespace();
 
   // Modal state for creating items
   const [createFolderModal, setCreateFolderModal] = React.useState<{
@@ -158,11 +156,6 @@ export const BookmarkTreeView: React.FC = () => {
           <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`} />
           {connected ? 'Connected' : 'Disconnected'}
         </div>
-        {selected && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
-            {selected}
-          </span>
-        )}
         {loading && (
           <span className="text-xs text-muted-foreground">Loading…</span>
         )}
