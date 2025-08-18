@@ -1,12 +1,14 @@
-import { BookmarkRepository } from './repository.js';
-import type { TreeNode, NewNode, NewFolder, NewBookmark, Operation, NewOperation } from './schema.js';
+import { BookmarkRepository } from '../db/repository.js';
+import { OperationsService } from './operationsService.js';
+import type { TreeNode, NewNode, NewFolder, NewBookmark } from '../db/schema.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export class BookmarkService {
   private repository: BookmarkRepository;
-
-  constructor() {
+  private operations: OperationsService;
+  constructor(operationsService: OperationsService) {
     this.repository = new BookmarkRepository();
+    this.operations = operationsService;
   }
 
   // Node service methods
@@ -33,7 +35,7 @@ export class BookmarkService {
     );
 
     // Record the operation
-    await this.recordOperation({
+    const operation = {
       id: `op-create-${node.id}-${now.getTime()}`,
       namespace,
       type: 'create',
@@ -42,7 +44,7 @@ export class BookmarkService {
       timestamp: now,
       deviceId: 'server',
       sessionId: `session-${Date.now()}`,
-    });
+    };
 
     return node;
   }
@@ -70,7 +72,7 @@ export class BookmarkService {
     );
 
     // Record the operation
-    await this.recordOperation({
+    await this.operations.recordOperation({
       id: `op-create-${node.id}-${now.getTime()}`,
       namespace,
       type: 'create',
@@ -106,7 +108,7 @@ export class BookmarkService {
 
     if (updatedNode) {
       // Record the operation
-      await this.recordOperation({
+      await this.operations.recordOperation({
         id: `op-update-${id}-${now.getTime()}`,
         namespace,
         type: 'update',
@@ -140,7 +142,7 @@ export class BookmarkService {
     if (deleted) {
       const now = new Date();
       // Record the operation
-      await this.recordOperation({
+      await this.operations.recordOperation({
         id: `op-delete-${id}-${now.getTime()}`,
         namespace,
         type: 'delete',
@@ -187,7 +189,7 @@ export class BookmarkService {
 
     if (updatedNode) {
       // Record the move operation
-      await this.recordOperation({
+      await this.operations.recordOperation({
         id: `op-move-${nodeId}-${now.getTime()}`,
         namespace,
         type: 'move',
@@ -272,43 +274,6 @@ export class BookmarkService {
     await this.repository.initializeWithSampleData();
   }
 
-  // Operation methods
-  private async recordOperation(operationData: NewOperation): Promise<Operation> {
-    return await this.repository.createOperation(operationData);
-  }
-
-  async getOperations(limit: number = 100): Promise<Operation[]> {
-    return await this.repository.getOperations(limit);
-  }
-
-  async getOperationsAfter(timestamp: Date): Promise<Operation[]> {
-    return await this.repository.getOperationsAfter(timestamp);
-  }
-
-  async getNodeOperations(nodeId: string): Promise<Operation[]> {
-    return await this.repository.getOperationsByNode(nodeId);
-  }
-
-  // Sync operations
-  async createSnapshot(namespace: string): Promise<void> {
-    const tree = await this.getSerializedTree(namespace);
-    if (!tree) {
-      throw new Error('No tree data to snapshot');
-    }
-
-    await this.repository.createSnapshot({
-      id: `snapshot-${Date.now()}`,
-      namespace,
-      rootId: tree.rootId,
-      data: JSON.stringify(tree),
-      timestamp: new Date(),
-      version: 1,
-    });
-  }
-
-  async getLatestSnapshot(namespace: string) {
-    return await this.repository.getLatestSnapshot(namespace);
-  }
 
   // Utility methods
   async getTreeStats(): Promise<{
@@ -330,160 +295,5 @@ export class BookmarkService {
 
   async getAllNamespaces(): Promise<Array<{ namespace: string; rootNodeId: string; rootNodeTitle: string }>> {
     return await this.repository.getAllNamespaces();
-  }
-
-  // Apply operation envelope coming from client
-  async applyOperationEnvelope(namespace: string, envelope: {
-    id: string;
-    ts: number;
-    op: { type: string;[k: string]: any };
-  }): Promise<{ success: boolean; operationId: string; message?: string; error?: string; data?: any }> {
-    // Idempotency: if operation already exists, return success
-    const existing = await this.repository.getOperationById(envelope.id);
-    if (existing) {
-      return {
-        success: true,
-        operationId: envelope.id,
-        message: 'Operation already applied'
-      };
-    }
-
-    const type = envelope.op.type;
-    try {
-      let data: any = null;
-      switch (type) {
-        case 'create_folder': {
-          const { id, parentId = null, title, isOpen = true, index, orderKey } = envelope.op;
-          data = await this.createFolder(namespace, {
-            id,
-            parentId,
-            orderKey: orderKey || undefined,
-          }, {
-            title,
-            isOpen
-          });
-          break;
-        }
-        case 'create_bookmark': {
-          const { id, parentId = null, title, url, index, orderKey, description, favicon } = envelope.op;
-          data = await this.createBookmark(namespace, {
-            id,
-            parentId,
-            orderKey: orderKey || undefined,
-          }, {
-            title,
-            url,
-            description,
-            favicon
-          });
-          break;
-        }
-        case 'move_node':
-        case 'move_item_to_folder': {
-          const { nodeId, toFolderId, index, orderKey } = envelope.op;
-          data = await this.moveNode(namespace, nodeId, toFolderId || null, orderKey);
-          break;
-        }
-        case 'update_node': {
-          const { nodeId, parentId, orderKey } = envelope.op as any;
-          if (!nodeId) throw new Error('update_node: nodeId is required');
-          const existing = await this.repository.getNode(nodeId, namespace);
-          if (!existing) throw new Error(`Node not found: ${nodeId}`);
-          const nodeUpdates: Partial<any> = {};
-          if (parentId !== undefined) nodeUpdates.parentId = parentId;
-          if (orderKey !== undefined) nodeUpdates.orderKey = orderKey;
-          const updated = existing.kind === 'folder'
-            ? await this.repository.updateFolder(nodeId, nodeUpdates, {})
-            : await this.repository.updateBookmark(nodeId, nodeUpdates, {});
-          data = { nodeId, parentId: updated?.parentId, orderKey: updated?.orderKey };
-          break;
-        }
-        case 'open_folder':
-        case 'close_folder': {
-          const folderId = (type === 'open_folder' || type === 'close_folder') ? envelope.op.folderId : undefined;
-
-          if (!folderId) {
-            throw new Error('folderId is required for folder open/close operations');
-          }
-
-          const isOpen = type === 'open_folder';
-          data = await this.updateNode(namespace, folderId, {}, { isOpen });
-          break;
-        }
-        case 'remove_node': {
-          const { nodeId } = envelope.op;
-          const ok = await this.deleteNode(namespace, nodeId);
-          data = { deleted: ok };
-          break;
-        }
-        case 'mark_folder_loaded':
-        case 'hydrate_node':
-        case 'mark_folder_not_loaded': {
-          // Client-only state ops; ignore on server
-          data = { skipped: true };
-          break;
-        }
-        default:
-          return { success: false, operationId: envelope.id, error: `Unsupported operation type: ${type}` };
-      }
-
-      // Record client-provided operation id with namespace
-      await this.repository.createOperation({
-        id: envelope.id,
-        namespace,
-        type: this.mapOpTypeToDbType(type),
-        nodeId: this.extractNodeIdFromOp(envelope.op),
-        data: JSON.stringify(envelope.op),
-        timestamp: new Date(envelope.ts),
-        deviceId: 'client',
-        sessionId: 'client-sync'
-      });
-
-      return { success: true, operationId: envelope.id, message: 'Operation applied', data };
-    } catch (err: any) {
-      return { success: false, operationId: envelope.id, error: err?.message || 'Unknown error' };
-    }
-  }
-
-  private mapOpTypeToDbType(type: string): 'create' | 'update' | 'delete' | 'move' {
-    switch (type) {
-      case 'create_folder':
-      case 'create_bookmark':
-        return 'create';
-      case 'move_node':
-      case 'move_item_to_folder':
-      case 'reorder':
-        return 'move';
-      case 'update_node':
-      case 'remove_node':
-        return 'delete';
-      case 'open_folder':
-      case 'close_folder':
-        return 'update';
-      default:
-        return 'update';
-    }
-  }
-
-  private extractNodeIdFromOp(op: { type: string;[k: string]: any }): string {
-    switch (op.type) {
-      case 'create_folder':
-      case 'create_bookmark':
-        return op.id;
-      case 'move_node':
-      case 'move_item_to_folder':
-        return op.nodeId;
-      case 'reorder':
-        return (op as any).nodeId || (op as any).folderId;
-      case 'update_node':
-        return (op as any).nodeId;
-      case 'open_folder':
-      case 'close_folder':
-        return op.folderId;
-      case 'remove_node':
-        return op.nodeId;
-      default:
-        return op.id || op.nodeId || 'unknown';
-    }
   }
 }

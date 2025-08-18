@@ -29,7 +29,6 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
   // Hydration state management
   private serverBaselineTimestamp = 0; // Last known server state timestamp
-  private pendingLocalOperations: OperationEnvelope[] = []; // Operations not yet synced to server
 
   constructor() {
     console.log('[SharedWorker] BookmarkSharedWorker initialized');
@@ -141,7 +140,16 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       event
     });
 
-    // Handle specific server events
+    // Support both legacy typed events and new 'operation' envelope events
+    const hasOpEnvelope = (event as unknown as { data?: { op?: { type?: string } } }).data?.op?.type;
+
+    if (event.type === 'operation' || hasOpEnvelope) {
+      // New server format: { type: 'operation', data: { id, ts, op: { type, ... } } }
+      this.handleServerDataEvent(event);
+      return;
+    }
+
+    // Legacy typed events coming directly as event.type
     switch (event.type) {
       case 'bookmark_created':
       case 'folder_created':
@@ -153,9 +161,10 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       case 'open_folder':
       case 'close_folder':
         this.handleServerDataEvent(event);
-        break;
+        return;
       default:
         console.log(`[SharedWorker] Unhandled server event type: ${event.type}`);
+        return;
     }
   }
 

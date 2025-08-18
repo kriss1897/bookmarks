@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { useBookmarkTreeSnapshot } from '@/hooks/useBookmarkTreeSnapshot';
-import { ReusableTreeComponent, type TreeOperations, type TreeState } from './ReusableTreeComponent';
+import { TreeComponent, type TreeOperations, type TreeState } from './TreeComponent';
 import { Button } from './ui/button';
 import { isFolder, type BookmarkTreeNode } from '@/lib/tree/BookmarkTree';
 import { generateKeyBetween } from 'fractional-indexing';
@@ -15,9 +15,7 @@ import { generateKeyBetween } from 'fractional-indexing';
 export const BookmarkTreeView: React.FC = () => {
   const {
     tree,
-    loading,
     error,
-    connected,
     reload,
     reconnect,
     createFolder,
@@ -150,26 +148,12 @@ export const BookmarkTreeView: React.FC = () => {
 
   return (
     <div>
-      <div className="mb-4 flex items-center gap-2">
-        <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs ${connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-          }`}>
-          <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`} />
-          {connected ? 'Connected' : 'Disconnected'}
-        </div>
-        {loading && (
-          <span className="text-xs text-muted-foreground">Loading…</span>
-        )}
-        <Button onClick={reload} size="sm" variant="outline" className="ml-auto" aria-label="Reload tree">
-          Reload
-        </Button>
-      </div>
-
-      <ReusableTreeComponent
+      <TreeComponent
         state={state}
         operations={treeOperations}
-        title="Bookmark Tree View (Snapshot)"
+        title="Bookmarks"
         showOperationsLog={false}
-        showSerializedTree={true}
+        showSerializedTree={false}
       />
 
       {/* Create Folder Modal */}

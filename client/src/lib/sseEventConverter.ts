@@ -5,6 +5,13 @@
 import type { ServerEvent } from '../types/sse';
 import type { TreeOperation, OperationEnvelope } from '../lib/builder/treeBuilder';
 
+type OperationEventData = {
+  id?: string;
+  ts?: number;
+  op?: TreeOperation & { type: string };
+  [key: string]: unknown;
+};
+
 /**
  * Convert a server SSE event to a TreeOperation
  */
@@ -12,6 +19,17 @@ export function convertServerEventToOperation(event: ServerEvent): TreeOperation
   const { type, data } = event;
 
   try {
+    // New unified 'operation' event: server sends full envelope: { id, ts, op }
+    if (type === 'operation' && typeof data === 'object' && data && 'op' in (data as OperationEventData)) {
+      const op = (data as OperationEventData).op;
+      if (!op?.type) {
+        console.warn('[SSE Converter] Missing op.type in operation event');
+        return null;
+      }
+      // Pass through operation as-is; it already matches TreeOperation schema
+      return op as TreeOperation;
+    }
+
     switch (type) {
       case 'bookmark_created':
         return {
@@ -64,10 +82,11 @@ export function convertServerEventToOperation(event: ServerEvent): TreeOperation
 
       case 'item_moved':
         return {
-          type: 'move_node',
+          // Map legacy move to new unified update_node
+          type: 'update_node',
           nodeId: data.id as string,
-          toFolderId: data.parentId as string,
-          index: data.index as number
+          parentId: data.parentId as string,
+          orderKey: data.orderKey as string
         };
 
   // folder_toggled event removed; server now emits explicit open_folder/close_folder
@@ -98,17 +117,28 @@ export function convertServerEventToOperation(event: ServerEvent): TreeOperation
  * Convert a server SSE event to a complete OperationEnvelope for persistence
  */
 export function convertServerEventToEnvelope(event: ServerEvent): OperationEnvelope | null {
-  const operation = convertServerEventToOperation(event);
-  if (!operation) {
-    return null;
+  // If the event already carries a full envelope (operation type), use it directly
+  if (event.type === 'operation' && typeof event.data === 'object' && event.data && 'op' in (event.data as OperationEventData)) {
+    const d = event.data as OperationEventData;
+    const envelope: OperationEnvelope = {
+      id: d.id ?? event.id,
+      ts: typeof d.ts === 'number' ? d.ts : new Date(event.timestamp).getTime(),
+      op: d.op!,
+      remote: true,
+      processed: true
+    };
+    return envelope;
   }
 
+  const operation = convertServerEventToOperation(event);
+  if (!operation) return null;
+
   return {
-    id: event.id, // Use server-provided event ID
-    ts: new Date(event.timestamp).getTime(), // Convert ISO timestamp to epoch ms
+    id: event.id,
+    ts: new Date(event.timestamp).getTime(),
     op: operation,
-    remote: true, // Mark as remote operation
-    processed: true // Mark as already processed by server
+    remote: true,
+    processed: true
   };
 }
 
@@ -124,15 +154,25 @@ export function validateServerEventData(event: ServerEvent): boolean {
   const moveFields = ['parentId'];
 
   try {
-    // Check common fields
+    // Special case first: new operation envelope shouldn't require legacy common fields on data
+    if (type === 'operation') {
+      const od = data as OperationEventData;
+      const hasOp = typeof od?.op?.type === 'string';
+      const hasId = typeof od?.id === 'string' || typeof event.id === 'string';
+      const hasTs = typeof od?.ts === 'number' || typeof event.timestamp === 'string';
+      if (!hasOp) console.warn(`[SSE Converter] Missing 'op.type' in operation event`);
+      return !!(hasOp && hasId && hasTs);
+    }
+
+    // For legacy typed events, check common fields exist in data
     for (const field of commonFields) {
-      if (!data[field]) {
+      if (!(field in data)) {
         console.warn(`[SSE Converter] Missing required field '${field}' in ${type} event`);
         return false;
       }
     }
 
-    // Check type-specific fields
+    // Check type-specific fields for legacy events
     switch (type) {
       case 'bookmark_created':
       case 'bookmark_updated':
@@ -155,7 +195,7 @@ export function validateServerEventData(event: ServerEvent): boolean {
         });
 
       case 'item_moved':
-        return moveFields.every(field => {
+  return moveFields.every(field => {
           if (!data[field]) {
             console.warn(`[SSE Converter] Missing required field '${field}' in ${type} event`);
             return false;

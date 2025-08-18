@@ -1,5 +1,5 @@
-import { EventPublisher } from './services/EventPublisher.js';
-import { EventsManager } from './services/EventsManager.js';
+import { EventPublisher } from './events/EventPublisher.js';
+import { EventsManager } from './events/EventsManager.js';
 
 // Create a simple test script to send test events
 const eventsManager = new EventsManager();

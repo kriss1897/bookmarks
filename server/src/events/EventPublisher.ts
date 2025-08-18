@@ -34,11 +34,7 @@ export class EventPublisher implements IEventPublisher {
     const event: ServerEvent = {
       id: this.generateEventId(),
       type: data.type || 'operation',
-      data: {
-        ...data,
-        namespace,
-        timestamp: data.timestamp || new Date().toISOString(),
-      },
+      data: data,
       timestamp: new Date().toISOString(),
       namespace
     };

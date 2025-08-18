@@ -18,19 +18,6 @@ sqlite.pragma('journal_mode = WAL');
 // Create drizzle instance
 export const db = drizzle(sqlite, { schema });
 
-// Auto-migrate on startup
-export async function initializeDatabase() {
-  try {
-    await migrate(db, { 
-      migrationsFolder: path.resolve(__dirname, './migrations') 
-    });
-    console.log('✅ Database migrations completed');
-  } catch (error: any) {
-    console.error('❌ Database initialization failed:', error);
-    throw error;
-  }
-}
-
 // Close database connection
 export function closeDatabase() {
   sqlite.close();

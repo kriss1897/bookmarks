@@ -49,13 +49,13 @@ export class ServerAPI {
    * @returns Promise containing the node data and its children
    */
   static async fetchNodeWithChildren(
-    nodeId: NodeId, 
+    nodeId: NodeId,
     options?: { signal?: AbortSignal }
   ): Promise<NodeWithChildren> {
     const url = `${this.config.baseURL}/api/${this.config.namespace}/tree/node/${nodeId}`;
-    
+
     console.log(`[ServerAPI] Fetching node data from: ${url}`);
-    
+
     try {
       const response = await fetch(url, {
         method: 'GET',
@@ -70,7 +70,7 @@ export class ServerAPI {
       }
 
       const result = await response.json();
-      
+
       if (!result.success) {
         throw new Error(result.message || 'Server returned error');
       }
@@ -79,7 +79,7 @@ export class ServerAPI {
       const serverData = result.data;
       const rootNodeId = serverData.rootId;
       const nodes = serverData.nodes;
-      
+
       // Extract the main node
       const mainNode = nodes[rootNodeId];
       if (!mainNode) {
@@ -88,7 +88,7 @@ export class ServerAPI {
 
       // Extract ALL children from the server response (not just direct children)
       const children: BookmarkTreeNode[] = [];
-      
+
       // Process all nodes except the main node
       for (const node of Object.values(nodes) as Record<string, unknown>[]) {
         if (node.id !== rootNodeId) {
@@ -99,17 +99,17 @@ export class ServerAPI {
       // Transform main node to partial format for hydration
       // The children array for the main node should be only its direct children
       const directChildren = children.filter(child => child.parentId === rootNodeId);
-      
+
       const nodeData: Partial<BookmarkTreeNode> = {
         id: mainNode.id,
         title: mainNode.title,
         updatedAt: mainNode.updatedAt,
-        ...(mainNode.kind === 'folder' && { 
+        ...(mainNode.kind === 'folder' && {
           isOpen: mainNode.isOpen,
           isLoaded: true,
           children: directChildren.map(child => child.id)
         }),
-        ...(mainNode.kind === 'bookmark' && { 
+        ...(mainNode.kind === 'bookmark' && {
           url: mainNode.url,
           description: mainNode.description,
           favicon: mainNode.favicon
@@ -147,13 +147,13 @@ export class ServerAPI {
       return {
         ...baseNode,
         kind: 'folder',
-  isOpen: (serverNode.isOpen as boolean) || false,
-  // Important: non-root folders included in another node's payload should NOT be marked loaded,
-  // otherwise opening them won't trigger hydration. We'll mark only the main fetched node as loaded
-  // via nodeData in fetchNodeWithChildren().
-  isLoaded: false,
-  // Children for non-root nodes will be populated on dedicated hydration for that node
-  children: []
+        isOpen: (serverNode.isOpen as boolean) || false,
+        // Important: non-root folders included in another node's payload should NOT be marked loaded,
+        // otherwise opening them won't trigger hydration. We'll mark only the main fetched node as loaded
+        // via nodeData in fetchNodeWithChildren().
+        isLoaded: false,
+        // Children for non-root nodes will be populated on dedicated hydration for that node
+        children: []
       };
     } else {
       return {
@@ -180,9 +180,9 @@ export class ServerAPI {
     }
 
     const url = `${this.config.baseURL}/api/${this.config.namespace}/operations/apply`;
-    
+
     console.log(`[ServerAPI] Applying operation to server:`, operation.id, operation.op.type);
-    
+
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -198,7 +198,7 @@ export class ServerAPI {
       }
 
       const result = await response.json();
-      
+
       if (!result.success) {
         console.warn(`[ServerAPI] Server rejected operation ${operation.id}:`, result.error);
         return {
@@ -214,7 +214,7 @@ export class ServerAPI {
         operationId: operation.id,
         message: result.message || 'Operation applied successfully'
       };
-      
+
     } catch (error) {
       console.error(`[ServerAPI] Failed to apply operation ${operation.id}:`, error);
       throw error;
