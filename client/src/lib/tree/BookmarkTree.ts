@@ -131,7 +131,8 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
       kind: "folder",
       title: params.title,
       parentId,
-      isOpen: /* params.isOpen ?? */ false, // New folders are closed by default
+  // Respect caller's requested open state; default to closed if not provided
+  isOpen: params.isOpen ?? false,
       isLoaded: false, // New folders need to be loaded from server
       children: [],
       createdAt: now,
