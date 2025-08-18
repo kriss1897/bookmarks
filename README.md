@@ -50,10 +50,15 @@ Prerequisites:
 Install dependencies (root installs both workspaces):
 
 ```sh
-npm install
+npm install --workspaces
 ```
 
 Start the dev server (serves API and client together):
+
+
+```sh
+npx -w server drizzle-kit push
+```
 
 ```sh
 npm run dev
