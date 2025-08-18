@@ -14,8 +14,9 @@ export class BookmarkService {
   // Node service methods
   async createFolder(
     namespace: string,
-    nodeData: Partial<Pick<NewNode, 'id'>> & Omit<NewNode, 'id' | 'kind' | 'createdAt' | 'updatedAt' | 'namespace'>,
-    folderData: Omit<NewFolder, 'nodeId'>
+    nodeData: Partial<Pick<NewNode, 'id'>> &
+      Omit<NewNode, 'id' | 'kind' | 'createdAt' | 'updatedAt' | 'namespace'>,
+    folderData: Omit<NewFolder, 'nodeId'>,
   ): Promise<TreeNode> {
     const now = new Date();
     const id = nodeData.id || `folder-${uuidv4()}`;
@@ -31,7 +32,7 @@ export class BookmarkService {
       {
         ...folderData,
         nodeId: id,
-      }
+      },
     );
 
     // Record the operation
@@ -51,8 +52,9 @@ export class BookmarkService {
 
   async createBookmark(
     namespace: string,
-    nodeData: Partial<Pick<NewNode, 'id'>> & Omit<NewNode, 'id' | 'kind' | 'createdAt' | 'updatedAt' | 'namespace'>,
-    bookmarkData: Omit<NewBookmark, 'nodeId'>
+    nodeData: Partial<Pick<NewNode, 'id'>> &
+      Omit<NewNode, 'id' | 'kind' | 'createdAt' | 'updatedAt' | 'namespace'>,
+    bookmarkData: Omit<NewBookmark, 'nodeId'>,
   ): Promise<TreeNode> {
     const now = new Date();
     const id = nodeData.id || `bookmark-${uuidv4()}`;
@@ -68,7 +70,7 @@ export class BookmarkService {
       {
         ...bookmarkData,
         nodeId: id,
-      }
+      },
     );
 
     // Record the operation
@@ -90,7 +92,7 @@ export class BookmarkService {
     namespace: string,
     id: string,
     nodeUpdates: Partial<Omit<NewNode, 'id' | 'createdAt' | 'updatedAt'>>,
-    specificUpdates: any = {}
+    specificUpdates: any = {},
   ): Promise<TreeNode | null> {
     const existingNode = await this.repository.getNode(id, namespace);
     if (!existingNode) {
@@ -170,7 +172,12 @@ export class BookmarkService {
     return rootNodes.length > 0 ? rootNodes[0] : null;
   }
 
-  async moveNode(namespace: string, nodeId: string, newParentId: string | null, orderKey?: string): Promise<TreeNode | null> {
+  async moveNode(
+    namespace: string,
+    nodeId: string,
+    newParentId: string | null,
+    orderKey?: string,
+  ): Promise<TreeNode | null> {
     const node = await this.repository.getNode(nodeId, namespace);
     if (!node) {
       return null;
@@ -179,13 +186,23 @@ export class BookmarkService {
     const previousParentId = node.parentId;
     const now = new Date();
 
-    const updatedNode = await this.repository.updateFolder(nodeId, {
-      parentId: newParentId,
-      orderKey: orderKey || node.orderKey,
-    }, {}) || await this.repository.updateBookmark(nodeId, {
-      parentId: newParentId,
-      orderKey: orderKey || node.orderKey,
-    }, {});
+    const updatedNode =
+      (await this.repository.updateFolder(
+        nodeId,
+        {
+          parentId: newParentId,
+          orderKey: orderKey || node.orderKey,
+        },
+        {},
+      )) ||
+      (await this.repository.updateBookmark(
+        nodeId,
+        {
+          parentId: newParentId,
+          orderKey: orderKey || node.orderKey,
+        },
+        {},
+      ));
 
     if (updatedNode) {
       // Record the move operation
@@ -209,11 +226,16 @@ export class BookmarkService {
   }
 
   // Tree operations
-  async getSerializedTree(namespace: string): Promise<{ rootId: string; nodes: Record<string, any> } | null> {
+  async getSerializedTree(
+    namespace: string,
+  ): Promise<{ rootId: string; nodes: Record<string, any> } | null> {
     return await this.repository.buildSerializedTree(namespace);
   }
 
-  async getNodeWithChildren(namespace: string, nodeId: string): Promise<{ rootId: string; nodes: Record<string, any> } | null> {
+  async getNodeWithChildren(
+    namespace: string,
+    nodeId: string,
+  ): Promise<{ rootId: string; nodes: Record<string, any> } | null> {
     const rootNode = await this.repository.getNode(nodeId, namespace);
     if (!rootNode) {
       return null;
@@ -225,7 +247,7 @@ export class BookmarkService {
     const loadNodeAndChildren = async (node: TreeNode): Promise<void> => {
       // Get direct children first
       const children = await this.repository.getNodesByParent(node.id, namespace);
-      const childrenIds = children.map(child => child.id);
+      const childrenIds = children.map((child) => child.id);
 
       // Add current node to the result with children array
       nodes[node.id] = {
@@ -237,7 +259,7 @@ export class BookmarkService {
         ...(node.kind === 'bookmark' && {
           url: node.url,
           description: node.description,
-          favicon: node.favicon
+          favicon: node.favicon,
         }),
         ...(node.kind === 'folder' && { isOpen: node.isOpen }),
         createdAt: node.createdAt.getTime(),
@@ -247,7 +269,7 @@ export class BookmarkService {
 
       // Only load children recursively if:
       // 1. This is not a folder (bookmarks don't have children anyway), OR
-      // 2. This is a folder and it's open, OR  
+      // 2. This is a folder and it's open, OR
       // 3. This is the root node we're starting from
       const shouldLoadChildren =
         node.kind !== 'folder' ||
@@ -274,7 +296,6 @@ export class BookmarkService {
     await this.repository.initializeWithSampleData();
   }
 
-
   // Utility methods
   async getTreeStats(): Promise<{
     totalNodes: number;
@@ -287,13 +308,15 @@ export class BookmarkService {
 
     return {
       totalNodes: allNodes.length,
-      totalBookmarks: allNodes.filter(n => n.kind === 'bookmark').length,
-      totalFolders: allNodes.filter(n => n.kind === 'folder').length,
+      totalBookmarks: allNodes.filter((n) => n.kind === 'bookmark').length,
+      totalFolders: allNodes.filter((n) => n.kind === 'folder').length,
       totalOperations: operations.length,
     };
   }
 
-  async getAllNamespaces(): Promise<Array<{ namespace: string; rootNodeId: string; rootNodeTitle: string }>> {
+  async getAllNamespaces(): Promise<
+    Array<{ namespace: string; rootNodeId: string; rootNodeTitle: string }>
+  > {
     return await this.repository.getAllNamespaces();
   }
 }

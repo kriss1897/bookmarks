@@ -2,9 +2,9 @@
  * BookmarkTree - extends the general Tree with bookmark-specific functionality
  */
 
-import { Tree, generateId } from './Tree';
-import type { BaseTreeNode, NodeId, TreeConfig } from './types';
-import type { TreeNodeStorage } from './storage';
+import { Tree, generateId } from "./Tree";
+import type { BaseTreeNode, NodeId, TreeConfig } from "./types";
+import type { TreeNodeStorage } from "./storage";
 
 export type NodeKind = "bookmark" | "folder";
 
@@ -33,35 +33,43 @@ export interface BookmarkTreeConfig extends TreeConfig<BookmarkTreeNode> {
 }
 
 /** Type guards */
-export const isFolder = (n: BookmarkTreeNode | undefined | null): n is FolderNode => n?.kind === "folder";
-export const isBookmark = (n: BookmarkTreeNode | undefined | null): n is BookmarkNode => n?.kind === "bookmark";
+export const isFolder = (
+  n: BookmarkTreeNode | undefined | null,
+): n is FolderNode => n?.kind === "folder";
+export const isBookmark = (
+  n: BookmarkTreeNode | undefined | null,
+): n is BookmarkNode => n?.kind === "bookmark";
 
 /**
  * BookmarkTree extends the general Tree with bookmark-specific operations
  */
 export class BookmarkTree extends Tree<BookmarkTreeNode> {
-  
-  constructor(storage: TreeNodeStorage<BookmarkTreeNode>, config: BookmarkTreeConfig = {}) {
+  constructor(
+    storage: TreeNodeStorage<BookmarkTreeNode>,
+    config: BookmarkTreeConfig = {},
+  ) {
     super(storage, config);
   }
 
   /**
    * Initialize with a root folder
    */
-  async initializeBookmarkTree(config: BookmarkTreeConfig = {}): Promise<NodeId> {
+  async initializeBookmarkTree(
+    config: BookmarkTreeConfig = {},
+  ): Promise<NodeId> {
     const rootNodeData: Partial<FolderNode> = {
       kind: "folder",
       title: config.rootTitle || "Bookmarks",
       isOpen: true,
       isLoaded: true, // Root folder is always considered loaded
-      children: []
+      children: [],
     };
-    
+
     // Add ID if specified in config
     if (config.rootId) {
       rootNodeData.id = config.rootId;
     }
-    
+
     return super.initialize(rootNodeData);
   }
 
@@ -71,7 +79,7 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
   async getRootFolder(): Promise<FolderNode> {
     const root = await this.getRoot();
     if (!isFolder(root)) {
-      throw new Error('Root node is not a folder');
+      throw new Error("Root node is not a folder");
     }
     return root;
   }
@@ -122,31 +130,34 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
     const parentId = params.parentId || this.rootId;
     const id = params.id || generateId();
     const now = Date.now();
-    
+
     // Verify parent exists and is a folder
     await this.requireFolder(parentId);
-    
+
     const folder: FolderNode = {
       id,
       kind: "folder",
       title: params.title,
       parentId,
-  // Respect caller's requested open state; default to closed if not provided
-  isOpen: params.isOpen ?? false,
+      // Respect caller's requested open state; default to closed if not provided
+      isOpen: params.isOpen ?? false,
       isLoaded: false, // New folders need to be loaded from server
       children: [],
       createdAt: now,
       updatedAt: now,
     };
 
-  // Always set order key based on position (append if index is undefined)
-  const siblings = await this.getChildren(parentId);
-  const [leftId, rightId] = this.getNeighborIdsAtIndex(siblings, params.index);
-  folder.orderKey = this.generateOrderKey(leftId, rightId);
+    // Always set order key based on position (append if index is undefined)
+    const siblings = await this.getChildren(parentId);
+    const [leftId, rightId] = this.getNeighborIdsAtIndex(
+      siblings,
+      params.index,
+    );
+    folder.orderKey = this.generateOrderKey(leftId, rightId);
 
     await this.setNode(folder);
     await this.updateParentChildren(parentId);
-    
+
     return id;
   }
 
@@ -163,10 +174,10 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
     const parentId = params.parentId || this.rootId;
     const id = params.id || generateId();
     const now = Date.now();
-    
+
     // Verify parent exists and is a folder
     await this.requireFolder(parentId);
-    
+
     const bookmark: BookmarkNode = {
       id,
       kind: "bookmark",
@@ -177,14 +188,17 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
       updatedAt: now,
     };
 
-  // Always set order key based on position (append if index is undefined)
-  const siblings = await this.getChildren(parentId);
-  const [leftId, rightId] = this.getNeighborIdsAtIndex(siblings, params.index);
-  bookmark.orderKey = this.generateOrderKey(leftId, rightId);
+    // Always set order key based on position (append if index is undefined)
+    const siblings = await this.getChildren(parentId);
+    const [leftId, rightId] = this.getNeighborIdsAtIndex(
+      siblings,
+      params.index,
+    );
+    bookmark.orderKey = this.generateOrderKey(leftId, rightId);
 
     await this.setNode(bookmark);
     await this.updateParentChildren(parentId);
-    
+
     return id;
   }
 
@@ -194,25 +208,29 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
   async remove(id: NodeId): Promise<void> {
     const node = await this.getNode(id);
     if (!node) return;
-    
+
     // Update parent's children array before removing
     if (node.parentId) {
       await this.updateParentChildren(node.parentId, [id]);
     }
-    
+
     await this.removeNode(id);
   }
 
   /**
    * Move a node to a target folder
    */
-  async move(params: { nodeId: NodeId; toFolderId: NodeId; index?: number }): Promise<void> {
+  async move(params: {
+    nodeId: NodeId;
+    toFolderId: NodeId;
+    index?: number;
+  }): Promise<void> {
     const { nodeId, toFolderId, index } = params;
     const node = await this.requireNode(nodeId);
     const oldParentId = node.parentId;
-    
+
     await this.moveNode(nodeId, toFolderId, index);
-    
+
     // Update both old and new parent children arrays
     if (oldParentId && oldParentId !== toFolderId) {
       await this.updateParentChildren(oldParentId, [nodeId]);
@@ -223,8 +241,16 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
   /**
    * Reorder items inside a folder
    */
-  async reorder(params: { folderId: NodeId; fromIndex: number; toIndex: number }): Promise<void> {
-    await this.reorderChildren(params.folderId, params.fromIndex, params.toIndex);
+  async reorder(params: {
+    folderId: NodeId;
+    fromIndex: number;
+    toIndex: number;
+  }): Promise<void> {
+    await this.reorderChildren(
+      params.folderId,
+      params.fromIndex,
+      params.toIndex,
+    );
     await this.updateParentChildren(params.folderId);
   }
 
@@ -235,7 +261,7 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
     const folder = await this.requireFolder(folderId);
     const updatedFolder = {
       ...folder,
-      isOpen: typeof open === "boolean" ? open : !folder.isOpen
+      isOpen: typeof open === "boolean" ? open : !folder.isOpen,
     };
     await this.setNode(updatedFolder);
   }
@@ -261,7 +287,7 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
     const folder = await this.requireFolder(folderId);
     const updatedFolder = {
       ...folder,
-      isLoaded: true
+      isLoaded: true,
     };
     await this.setNode(updatedFolder);
   }
@@ -287,25 +313,30 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
    */
   async getPathIds(id: NodeId): Promise<NodeId[]> {
     const path = await this.getPathToNode(id);
-    return path.map(node => node.id);
+    return path.map((node) => node.id);
   }
 
   /**
    * Update a folder's children array to match current tree structure
    * This maintains compatibility with existing code that expects the children array
    */
-  private async updateParentChildren(parentId: NodeId, excludeIds: NodeId[] = []): Promise<void> {
+  private async updateParentChildren(
+    parentId: NodeId,
+    excludeIds: NodeId[] = [],
+  ): Promise<void> {
     const parent = await this.getNode(parentId);
     if (!parent || !isFolder(parent)) return;
-    
+
     const childrenIds = await this.getChildrenIds(parentId);
-    const filteredChildrenIds = childrenIds.filter(id => !excludeIds.includes(id));
-    
+    const filteredChildrenIds = childrenIds.filter(
+      (id) => !excludeIds.includes(id),
+    );
+
     const updatedParent = {
       ...parent,
-      children: filteredChildrenIds
+      children: filteredChildrenIds,
     };
-    
+
     await this.setNode(updatedParent);
   }
 
@@ -327,7 +358,7 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
   get root(): FolderNode {
     const root = this.cache.get(this.rootId);
     if (!root || !isFolder(root)) {
-      throw new Error('Root folder not found in cache');
+      throw new Error("Root folder not found in cache");
     }
     return root;
   }
@@ -340,11 +371,11 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
     if (!folder || !isFolder(folder)) {
       throw new Error(`Folder ${folderId} not found in cache`);
     }
-    
+
     const children = folder.children
-      .map(id => this.cache.get(id))
+      .map((id) => this.cache.get(id))
       .filter((node): node is BookmarkTreeNode => node !== undefined);
-    
+
     return this.sortByOrderKey(children);
   }
 
@@ -353,7 +384,7 @@ export class BookmarkTree extends Tree<BookmarkTreeNode> {
    */
   async loadFullTree(): Promise<void> {
     await this.loadFromStorage();
-    
+
     // Update all folder children arrays to reflect current structure
     for (const [id, node] of this.cache) {
       if (isFolder(node)) {

@@ -15,24 +15,24 @@ export class EventsController {
    */
   handleEventsConnection = (req: Request, res: Response): void => {
     const clientId = ++this.clientCounter;
-    const namespace = req.query.namespace as string || 'default';
-    
+    const namespace = (req.query.namespace as string) || 'default';
+
     console.log(`New SSE client connecting (Client #${clientId}, Namespace: ${namespace})`);
-    
+
     // Validate namespace
     if (!namespace || typeof namespace !== 'string' || namespace.trim() === '') {
       res.status(400).json({ error: 'Namespace parameter is required' });
       return;
     }
-    
+
     // Set SSE headers
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
+      Connection: 'keep-alive',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': 'Cache-Control, Last-Event-ID',
-      'Access-Control-Allow-Methods': 'GET'
+      'Access-Control-Allow-Methods': 'GET',
     });
 
     // Create connection object
@@ -40,7 +40,7 @@ export class EventsController {
       id: `connection-${clientId}`,
       response: res,
       clientId,
-      namespace: namespace.trim()
+      namespace: namespace.trim(),
     };
 
     // Add connection to manager
@@ -55,10 +55,10 @@ export class EventsController {
         clientId,
         namespace: namespace.trim(),
         timestamp: new Date().toISOString(),
-        message: 'Events connection established successfully'
-      })
+        message: 'Events connection established successfully',
+      }),
     };
-    
+
     const sseData = `id: ${connectionEvent.id}\nevent: ${connectionEvent.event}\ndata: ${connectionEvent.data}\n\n`;
     res.write(sseData);
 

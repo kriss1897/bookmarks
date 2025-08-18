@@ -17,15 +17,15 @@ publisher.publishEvent('bookmark_created', {
     parentId: null,
     index: 'a0',
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  }
+    updatedAt: new Date().toISOString(),
+  },
 });
 
 // Send a test sync status event
 console.log('Sending test sync status event...');
 publisher.publishEvent('sync_status', {
   status: 'syncing',
-  message: 'Testing SSE connectivity'
+  message: 'Testing SSE connectivity',
 });
 
 console.log('Test events sent successfully!');

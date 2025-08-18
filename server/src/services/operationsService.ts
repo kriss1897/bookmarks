@@ -1,5 +1,12 @@
 import { BookmarkRepository } from '../db/repository.js';
-import type { Operation, NewOperation, TreeSnapshot, NewTreeSnapshot, SyncMetadata, NewSyncMetadata } from '../db/schema.js';
+import type {
+  Operation,
+  NewOperation,
+  TreeSnapshot,
+  NewTreeSnapshot,
+  SyncMetadata,
+  NewSyncMetadata,
+} from '../db/schema.js';
 import { BookmarkService } from './bookmarksService.js';
 
 export class OperationsService {
@@ -46,28 +53,42 @@ export class OperationsService {
   }
 
   // Sync metadata operations
-  async getSyncMetadata(deviceId: string, namespace: string = 'default'): Promise<SyncMetadata | null> {
+  async getSyncMetadata(
+    deviceId: string,
+    namespace: string = 'default',
+  ): Promise<SyncMetadata | null> {
     return await this.repository.getSyncMetadata(deviceId, namespace);
   }
 
-  async updateSyncMetadata(deviceId: string, data: Partial<NewSyncMetadata> & { namespace?: string }): Promise<SyncMetadata> {
+  async updateSyncMetadata(
+    deviceId: string,
+    data: Partial<NewSyncMetadata> & { namespace?: string },
+  ): Promise<SyncMetadata> {
     return await this.repository.updateSyncMetadata(deviceId, data);
   }
 
-
   // Apply operation envelope coming from client
-  async applyOperationEnvelope(namespace: string, envelope: {
-    id: string;
-    ts: number;
-    op: { type: string;[k: string]: any };
-  }): Promise<{ success: boolean; operationId: string; message?: string; error?: string; data?: any }> {
+  async applyOperationEnvelope(
+    namespace: string,
+    envelope: {
+      id: string;
+      ts: number;
+      op: { type: string; [k: string]: any };
+    },
+  ): Promise<{
+    success: boolean;
+    operationId: string;
+    message?: string;
+    error?: string;
+    data?: any;
+  }> {
     // Idempotency: if operation already exists, return success
-  const existing = await this.getOperationById(envelope.id);
+    const existing = await this.getOperationById(envelope.id);
     if (existing) {
       return {
         success: true,
         operationId: envelope.id,
-        message: 'Operation already applied'
+        message: 'Operation already applied',
       };
     }
 
@@ -77,28 +98,45 @@ export class OperationsService {
       switch (type) {
         case 'create_folder': {
           const { id, parentId = null, title, isOpen = true, index, orderKey } = envelope.op;
-          data = await this.bookmarks.createFolder(namespace, {
-            id,
-            parentId,
-            orderKey: orderKey || undefined,
-          }, {
-            title,
-            isOpen
-          });
+          data = await this.bookmarks.createFolder(
+            namespace,
+            {
+              id,
+              parentId,
+              orderKey: orderKey || undefined,
+            },
+            {
+              title,
+              isOpen,
+            },
+          );
           break;
         }
         case 'create_bookmark': {
-          const { id, parentId = null, title, url, index, orderKey, description, favicon } = envelope.op;
-          data = await this.bookmarks.createBookmark(namespace, {
+          const {
             id,
-            parentId,
-            orderKey: orderKey || undefined,
-          }, {
+            parentId = null,
             title,
             url,
+            index,
+            orderKey,
             description,
-            favicon
-          });
+            favicon,
+          } = envelope.op;
+          data = await this.bookmarks.createBookmark(
+            namespace,
+            {
+              id,
+              parentId,
+              orderKey: orderKey || undefined,
+            },
+            {
+              title,
+              url,
+              description,
+              favicon,
+            },
+          );
           break;
         }
         case 'move_node':
@@ -115,15 +153,17 @@ export class OperationsService {
           const nodeUpdates: Partial<any> = {};
           if (parentId !== undefined) nodeUpdates.parentId = parentId;
           if (orderKey !== undefined) nodeUpdates.orderKey = orderKey;
-          const updated = existing.kind === 'folder'
-            ? await this.repository.updateFolder(nodeId, nodeUpdates, {})
-            : await this.repository.updateBookmark(nodeId, nodeUpdates, {});
+          const updated =
+            existing.kind === 'folder'
+              ? await this.repository.updateFolder(nodeId, nodeUpdates, {})
+              : await this.repository.updateBookmark(nodeId, nodeUpdates, {});
           data = { nodeId, parentId: updated?.parentId, orderKey: updated?.orderKey };
           break;
         }
         case 'open_folder':
         case 'close_folder': {
-          const folderId = (type === 'open_folder' || type === 'close_folder') ? envelope.op.folderId : undefined;
+          const folderId =
+            type === 'open_folder' || type === 'close_folder' ? envelope.op.folderId : undefined;
 
           if (!folderId) {
             throw new Error('folderId is required for folder open/close operations');
@@ -147,7 +187,11 @@ export class OperationsService {
           break;
         }
         default:
-          return { success: false, operationId: envelope.id, error: `Unsupported operation type: ${type}` };
+          return {
+            success: false,
+            operationId: envelope.id,
+            error: `Unsupported operation type: ${type}`,
+          };
       }
 
       // Record client-provided operation id with namespace
@@ -159,7 +203,7 @@ export class OperationsService {
         data: JSON.stringify(envelope.op),
         timestamp: new Date(envelope.ts),
         deviceId: 'client',
-        sessionId: 'client-sync'
+        sessionId: 'client-sync',
       });
 
       return { success: true, operationId: envelope.id, message: 'Operation applied', data };
@@ -188,7 +232,7 @@ export class OperationsService {
     }
   }
 
-  private extractNodeIdFromOp(op: { type: string;[k: string]: any }): string {
+  private extractNodeIdFromOp(op: { type: string; [k: string]: any }): string {
     switch (op.type) {
       case 'create_folder':
       case 'create_bookmark':

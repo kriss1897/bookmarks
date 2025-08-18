@@ -11,7 +11,7 @@ const NODE_OPERATIONS = {
 
   move_node: 'item_moved',
   move_item_to_folder: 'item_moved',
-  remove_node: 'remove_node'
+  remove_node: 'remove_node',
 };
 
 export class OperationsController {
@@ -30,22 +30,40 @@ export class OperationsController {
       res.json({ success: true, data: ops });
     } catch (error) {
       console.error('Error fetching operations:', error);
-      res.status(500).json({ success: false, message: 'Internal server error', error: error instanceof Error ? error.message : 'Unknown error' });
+      res
+        .status(500)
+        .json({
+          success: false,
+          message: 'Internal server error',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
     }
   };
 
   applyOperation = async (req: Request, res: Response) => {
     try {
       const { namespace } = req.params;
-      const envelope = req.body as { id?: string; ts?: number; op?: { type?: string;[k: string]: unknown } };
+      const envelope = req.body as {
+        id?: string;
+        ts?: number;
+        op?: { type?: string; [k: string]: unknown };
+      };
 
       if (!envelope || !envelope.id || !envelope.ts || !envelope.op || !envelope.op.type) {
-        return res.status(400).json({ success: false, message: 'Invalid operation envelope: id, ts and op.type are required' });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: 'Invalid operation envelope: id, ts and op.type are required',
+          });
       }
 
       console.log(envelope);
 
-      const result = await this.operationsService.applyOperationEnvelope(namespace, envelope as any);
+      const result = await this.operationsService.applyOperationEnvelope(
+        namespace,
+        envelope as any,
+      );
 
       if (result.success) {
         this.eventPublisher.publishToNamespace(namespace, envelope);
@@ -56,9 +74,15 @@ export class OperationsController {
       return res.status(400).json(result);
     } catch (error) {
       console.error('Error applying operation:', error);
-      return res.status(500).json({ success: false, message: 'Internal server error', error: error instanceof Error ? error.message : 'Unknown error' });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: 'Internal server error',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
     }
-  }
+  };
 }
 
 export default OperationsController;

@@ -15,7 +15,11 @@ export class FoldersRepository {
   }
 
   async updateFolder(nodeId: string, updates: Partial<NewFolder>): Promise<Folder | null> {
-    const [updated] = await db.update(folders).set(updates).where(eq(folders.nodeId, nodeId)).returning();
+    const [updated] = await db
+      .update(folders)
+      .set(updates)
+      .where(eq(folders.nodeId, nodeId))
+      .returning();
     return updated || null;
   }
 }

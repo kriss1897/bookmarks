@@ -3,10 +3,14 @@
  * Handles the low-level connection, Comlink wrapping, and lifecycle
  */
 
-import * as Comlink from 'comlink';
-import type { SharedWorkerAPI } from '../workers/sharedWorkerAPI';
+import * as Comlink from "comlink";
+import type { SharedWorkerAPI } from "../workers/sharedWorkerAPI";
 
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type ConnectionState =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "error";
 
 export interface ConnectionStatus {
   state: ConnectionState;
@@ -17,7 +21,7 @@ export interface ConnectionStatus {
 export class SharedWorkerConnection {
   private worker: SharedWorker | null = null;
   private api: Comlink.Remote<SharedWorkerAPI> | null = null;
-  private state: ConnectionState = 'disconnected';
+  private state: ConnectionState = "disconnected";
   private error: string | null = null;
   private tabId: string;
   private listeners: Array<(status: ConnectionStatus) => void> = [];
@@ -34,9 +38,9 @@ export class SharedWorkerConnection {
     const status: ConnectionStatus = {
       state: this.state,
       error: this.error || undefined,
-      api: this.api || undefined
+      api: this.api || undefined,
     };
-    this.listeners.forEach(listener => listener(status));
+    this.listeners.forEach((listener) => listener(status));
   }
 
   private setState(state: ConnectionState, error?: string): void {
@@ -45,15 +49,17 @@ export class SharedWorkerConnection {
     this.notifyListeners();
   }
 
-  public onStateChange(listener: (status: ConnectionStatus) => void): () => void {
+  public onStateChange(
+    listener: (status: ConnectionStatus) => void,
+  ): () => void {
     this.listeners.push(listener);
     // Call immediately with current state
     listener({
       state: this.state,
       error: this.error || undefined,
-      api: this.api || undefined
+      api: this.api || undefined,
     });
-    
+
     // Return unsubscribe function
     return () => {
       const index = this.listeners.indexOf(listener);
@@ -64,22 +70,22 @@ export class SharedWorkerConnection {
   }
 
   public async connect(): Promise<void> {
-    if (this.state === 'connected' || this.state === 'connecting') {
+    if (this.state === "connected" || this.state === "connecting") {
       return;
     }
 
     try {
-      this.setState('connecting');
+      this.setState("connecting");
 
       // Create SharedWorker
       this.worker = new SharedWorker(
-        new URL('../workers/bookmark.worker.ts', import.meta.url),
-        { type: 'module' }
+        new URL("../workers/bookmark.worker.ts", import.meta.url),
+        { type: "module" },
       );
 
       // Set up error handling
-      this.worker.addEventListener('error', (event) => {
-        this.setState('error', `Worker error: ${event.message}`);
+      this.worker.addEventListener("error", (event) => {
+        this.setState("error", `Worker error: ${event.message}`);
       });
 
       // Wrap with Comlink
@@ -88,12 +94,15 @@ export class SharedWorkerConnection {
       // Connect to worker
       await this.api.connect(this.tabId);
 
-      console.log('connected');
+      console.log("connected");
 
-      this.setState('connected');
+      this.setState("connected");
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to connect to SharedWorker';
-      this.setState('error', errorMessage);
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to connect to SharedWorker";
+      this.setState("error", errorMessage);
       throw error;
     }
   }
@@ -104,11 +113,11 @@ export class SharedWorkerConnection {
         await this.api.disconnect(this.tabId);
       }
     } catch (error) {
-      console.warn('Error during disconnect:', error);
+      console.warn("Error during disconnect:", error);
     } finally {
       this.api = null;
       this.worker = null;
-      this.setState('disconnected');
+      this.setState("disconnected");
     }
   }
 
@@ -117,7 +126,7 @@ export class SharedWorkerConnection {
   }
 
   public isConnected(): boolean {
-    return this.state === 'connected' && this.api !== null;
+    return this.state === "connected" && this.api !== null;
   }
 
   public getState(): ConnectionState {

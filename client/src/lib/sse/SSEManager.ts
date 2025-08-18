@@ -1,4 +1,4 @@
-import type { ServerEvent, SSEConnectionState } from '../../types/sse';
+import type { ServerEvent, SSEConnectionState } from "../../types/sse";
 
 export interface SSEConfig {
   maxReconnectAttempts: number;
@@ -11,7 +11,7 @@ const DEFAULT_CONFIG: SSEConfig = {
   maxReconnectAttempts: 10,
   baseReconnectDelay: 1000,
   maxReconnectDelay: 30000,
-  backoffMultiplier: 2
+  backoffMultiplier: 2,
 };
 
 export class SSEManager {
@@ -30,7 +30,7 @@ export class SSEManager {
     namespace: string,
     onMessage: (event: ServerEvent) => void,
     onStateChange: (state: SSEConnectionState) => void,
-    config: Partial<SSEConfig> = {}
+    config: Partial<SSEConfig> = {},
   ) {
     this.url = url;
     this.namespace = namespace;
@@ -41,7 +41,7 @@ export class SSEManager {
 
   connect(): void {
     if (this.state.connecting || this.state.connected) {
-      console.log('SSE already connecting or connected');
+      console.log("SSE already connecting or connected");
       return;
     }
 
@@ -54,13 +54,13 @@ export class SSEManager {
       this.eventSource = new EventSource(sseUrl);
 
       this.eventSource.onopen = () => {
-        console.log('SSE connection opened');
+        console.log("SSE connection opened");
         this.reconnectAttempts = 0;
         this.setState({
           connected: true,
           connecting: false,
           lastConnected: Date.now(),
-          reconnectAttempt: 0
+          reconnectAttempt: 0,
         });
       };
 
@@ -69,21 +69,20 @@ export class SSEManager {
       };
 
       this.eventSource.onerror = (error) => {
-        console.error('SSE connection error:', error);
+        console.error("SSE connection error:", error);
         this.handleError();
       };
 
       // Listen for specific event types
       this.setupEventListeners();
-
     } catch (error) {
-      console.error('Failed to create SSE connection:', error);
+      console.error("Failed to create SSE connection:", error);
       this.handleError();
     }
   }
 
   disconnect(): void {
-    console.log('Disconnecting SSE');
+    console.log("Disconnecting SSE");
 
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
@@ -107,20 +106,20 @@ export class SSEManager {
 
     // Standard SSE events
     const eventTypes = [
-      'connection',
-      'operation',
-      'bookmark_created',
-      'bookmark_updated',
-      'bookmark_deleted',
-      'folder_created',
-      'folder_updated',
-      'folder_deleted',
-      'item_moved',
-      'open_folder',
-      'close_folder'
+      "connection",
+      "operation",
+      "bookmark_created",
+      "bookmark_updated",
+      "bookmark_deleted",
+      "folder_created",
+      "folder_updated",
+      "folder_deleted",
+      "item_moved",
+      "open_folder",
+      "close_folder",
     ];
 
-    eventTypes.forEach(eventType => {
+    eventTypes.forEach((eventType) => {
       this.eventSource!.addEventListener(eventType, (event) => {
         this.handleTypedEvent(eventType, event);
       });
@@ -130,19 +129,20 @@ export class SSEManager {
   private handleMessage(event: MessageEvent): void {
     try {
       const data = JSON.parse(event.data);
-      console.log('SSE message received:', data);
+      console.log("SSE message received:", data);
 
       const serverEvent: ServerEvent = {
-        id: data.id || `sse-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        type: data.type || 'message',
+        id:
+          data.id || `sse-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        type: data.type || "message",
         data,
         timestamp: data.timestamp || new Date().toISOString(),
-        namespace: this.namespace
+        namespace: this.namespace,
       };
 
       this.onMessage(serverEvent);
     } catch (error) {
-      console.error('Failed to parse SSE message:', error);
+      console.error("Failed to parse SSE message:", error);
     }
   }
 
@@ -152,11 +152,13 @@ export class SSEManager {
       console.log(`SSE ${eventType} event received:`, data);
 
       const serverEvent: ServerEvent = {
-        id: data.id || `sse-${eventType}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        id:
+          data.id ||
+          `sse-${eventType}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         type: eventType,
         data,
         timestamp: data.timestamp || new Date().toISOString(),
-        namespace: this.namespace
+        namespace: this.namespace,
       };
 
       this.onMessage(serverEvent);
@@ -171,7 +173,7 @@ export class SSEManager {
     this.setState({
       connected: false,
       connecting: false,
-      error: 'Connection failed'
+      error: "Connection failed",
     });
 
     if (this.eventSource) {
@@ -187,23 +189,26 @@ export class SSEManager {
 
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
-      console.error('Max reconnect attempts reached');
+      console.error("Max reconnect attempts reached");
       this.setState({
-        error: 'Max reconnect attempts reached',
-        reconnectAttempt: this.reconnectAttempts
+        error: "Max reconnect attempts reached",
+        reconnectAttempt: this.reconnectAttempts,
       });
       return;
     }
 
     const delay = Math.min(
-      this.config.baseReconnectDelay * Math.pow(this.config.backoffMultiplier, this.reconnectAttempts),
-      this.config.maxReconnectDelay
+      this.config.baseReconnectDelay *
+        Math.pow(this.config.backoffMultiplier, this.reconnectAttempts),
+      this.config.maxReconnectDelay,
     );
 
-    console.log(`Scheduling SSE reconnect in ${delay}ms (attempt ${this.reconnectAttempts + 1})`);
+    console.log(
+      `Scheduling SSE reconnect in ${delay}ms (attempt ${this.reconnectAttempts + 1})`,
+    );
 
     this.setState({
-      reconnectAttempt: this.reconnectAttempts + 1
+      reconnectAttempt: this.reconnectAttempts + 1,
     });
 
     this.reconnectTimeout = setTimeout(() => {

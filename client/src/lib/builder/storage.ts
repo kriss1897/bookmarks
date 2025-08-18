@@ -3,7 +3,7 @@
  * Implementations can persist to memory, IndexedDB, localStorage, or remote storage.
  */
 
-import type { OperationEnvelope } from './treeBuilder';
+import type { OperationEnvelope } from "./treeBuilder";
 
 // Type definitions to avoid circular dependencies
 interface StoredOperation {
@@ -81,43 +81,66 @@ export class IndexedDBOperationStorage extends OperationStorage {
   async persistOperation(env: OperationEnvelope): Promise<void> {
     try {
       await this.databaseService.appendOperation(env);
-      console.log('[IndexedDBOperationStorage] Operation persisted:', env.id);
+      console.log("[IndexedDBOperationStorage] Operation persisted:", env.id);
     } catch (error) {
-      console.error('[IndexedDBOperationStorage] Failed to persist operation:', error);
+      console.error(
+        "[IndexedDBOperationStorage] Failed to persist operation:",
+        error,
+      );
       // Don't throw - allow operation to succeed in memory even if persistence fails
     }
   }
 
-  async updateOperationStatus(operationId: string, status: 'completed' | 'pending' | 'failed', errorMessage?: string): Promise<void> {
+  async updateOperationStatus(
+    operationId: string,
+    status: "completed" | "pending" | "failed",
+    errorMessage?: string,
+  ): Promise<void> {
     try {
-      if ('updateOperationStatus' in this.databaseService) {
-        await (this.databaseService as DatabaseServiceInterface & {
-          updateOperationStatus(id: string, status: string, error?: string): Promise<void>;
-        }).updateOperationStatus(operationId, status, errorMessage);
-        console.log(`[IndexedDBOperationStorage] Updated operation ${operationId} status to ${status}`);
+      if ("updateOperationStatus" in this.databaseService) {
+        await (
+          this.databaseService as DatabaseServiceInterface & {
+            updateOperationStatus(
+              id: string,
+              status: string,
+              error?: string,
+            ): Promise<void>;
+          }
+        ).updateOperationStatus(operationId, status, errorMessage);
+        console.log(
+          `[IndexedDBOperationStorage] Updated operation ${operationId} status to ${status}`,
+        );
       } else {
-        console.warn('[IndexedDBOperationStorage] Database service does not support status updates');
+        console.warn(
+          "[IndexedDBOperationStorage] Database service does not support status updates",
+        );
       }
     } catch (error) {
-      console.error(`[IndexedDBOperationStorage] Failed to update operation status:`, error);
+      console.error(
+        `[IndexedDBOperationStorage] Failed to update operation status:`,
+        error,
+      );
     }
   }
 
   async loadOperations(): Promise<OperationEnvelope[]> {
     try {
-      console.log('Start loading operations');
+      console.log("Start loading operations");
 
       const storedOperations = await this.databaseService.loadOperationLog();
 
-      console.log('Loaded operations from storage', storedOperations);
+      console.log("Loaded operations from storage", storedOperations);
       // Convert stored operations back to OperationEnvelope format
       return storedOperations.map((stored: StoredOperation) => ({
         id: stored.id,
         ts: stored.ts,
-        op: stored.op as OperationEnvelope['op']
+        op: stored.op as OperationEnvelope["op"],
       }));
     } catch (error) {
-      console.error('[IndexedDBOperationStorage] Failed to load operations:', error);
+      console.error(
+        "[IndexedDBOperationStorage] Failed to load operations:",
+        error,
+      );
       return [];
     }
   }
@@ -126,7 +149,10 @@ export class IndexedDBOperationStorage extends OperationStorage {
     try {
       await this.databaseService.clear();
     } catch (error) {
-      console.error('[IndexedDBOperationStorage] Failed to clear operations:', error);
+      console.error(
+        "[IndexedDBOperationStorage] Failed to clear operations:",
+        error,
+      );
       throw error;
     }
   }
@@ -137,7 +163,7 @@ export class IndexedDBOperationStorage extends OperationStorage {
       await this.databaseService.getStats();
       return true;
     } catch (error) {
-      console.error('[IndexedDBOperationStorage] Database not ready:', error);
+      console.error("[IndexedDBOperationStorage] Database not ready:", error);
       return false;
     }
   }

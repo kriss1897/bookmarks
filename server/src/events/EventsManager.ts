@@ -17,17 +17,19 @@ export class EventsManager implements IEventsManager {
    */
   addConnection(connection: EventsConnection): void {
     this.connections.set(connection.clientId, connection);
-    
+
     // Add to namespace tracking
     if (!this.namespaceConnections.has(connection.namespace)) {
       this.namespaceConnections.set(connection.namespace, new Set());
     }
     this.namespaceConnections.get(connection.namespace)!.add(connection.clientId);
-    
+
     // Set up disconnect detection
     this.setupDisconnectDetection(connection);
-    
-    console.log(`SSE connection added (Client #${connection.clientId}, Namespace: ${connection.namespace}). Total connections: ${this.connections.size}`);
+
+    console.log(
+      `SSE connection added (Client #${connection.clientId}, Namespace: ${connection.namespace}). Total connections: ${this.connections.size}`,
+    );
   }
 
   /**
@@ -44,9 +46,11 @@ export class EventsManager implements IEventsManager {
           this.namespaceConnections.delete(connection.namespace);
         }
       }
-      
+
       this.connections.delete(clientId);
-      console.log(`SSE connection removed (Client #${clientId}, Namespace: ${connection.namespace}). Total connections: ${this.connections.size}`);
+      console.log(
+        `SSE connection removed (Client #${clientId}, Namespace: ${connection.namespace}). Total connections: ${this.connections.size}`,
+      );
     }
   }
 
@@ -66,7 +70,7 @@ export class EventsManager implements IEventsManager {
     });
 
     // Clean up dead connections
-    deadConnections.forEach(clientId => {
+    deadConnections.forEach((clientId) => {
       this.removeConnection(clientId);
     });
   }
@@ -77,15 +81,15 @@ export class EventsManager implements IEventsManager {
   broadcastToNamespace(namespace: string, event: ServerEvent): void {
     const deadConnections: number[] = [];
     const clientIds = this.namespaceConnections.get(namespace);
-    
+
     if (!clientIds || clientIds.size === 0) {
       console.log(`No clients connected to namespace: ${namespace}`);
       return;
     }
 
     console.log(`Broadcasting to namespace "${namespace}" with ${clientIds.size} clients`);
-    
-    clientIds.forEach(clientId => {
+
+    clientIds.forEach((clientId) => {
       const connection = this.connections.get(clientId);
       if (connection) {
         try {
@@ -93,14 +97,17 @@ export class EventsManager implements IEventsManager {
           const namespacedEvent = { ...event, namespace };
           this.sendToConnection(connection, namespacedEvent);
         } catch (error) {
-          console.error(`Failed to send event to client #${clientId} in namespace ${namespace}:`, error);
+          console.error(
+            `Failed to send event to client #${clientId} in namespace ${namespace}:`,
+            error,
+          );
           deadConnections.push(clientId);
         }
       }
     });
 
     // Clean up dead connections
-    deadConnections.forEach(clientId => {
+    deadConnections.forEach((clientId) => {
       this.removeConnection(clientId);
     });
   }
@@ -125,7 +132,7 @@ export class EventsManager implements IEventsManager {
    */
   private sendToConnection(connection: EventsConnection, event: ServerEvent): void {
     const response = connection.response;
-    
+
     // Check if the response is still writable
     if (response.destroyed || response.headersSent === false) {
       // Response is still active, we can write to it
@@ -134,7 +141,7 @@ export class EventsManager implements IEventsManager {
     } else {
       throw new Error(`Connection ${connection.clientId} is no longer writable`);
     }
-    
+
     try {
       const sseData = `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
       response.write(sseData);
@@ -148,19 +155,19 @@ export class EventsManager implements IEventsManager {
    */
   private setupDisconnectDetection(connection: EventsConnection): void {
     const { response, clientId } = connection;
-    
+
     // Detect when client closes the connection
     response.on('close', () => {
       console.log(`Client #${clientId} disconnected (close event)`);
       this.removeConnection(clientId);
     });
-    
+
     // Detect when connection ends
     response.on('finish', () => {
       console.log(`Client #${clientId} connection finished`);
       this.removeConnection(clientId);
     });
-    
+
     // Detect connection errors
     response.on('error', (error) => {
       console.error(`Client #${clientId} connection error:`, error);

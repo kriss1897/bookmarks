@@ -5,12 +5,16 @@
  * - Uses getTree() snapshots and broadcast-driven refresh
  */
 
-import React from 'react';
-import { useBookmarkTreeSnapshot } from '@/hooks/useBookmarkTreeSnapshot';
-import { TreeComponent, type TreeOperations, type TreeState } from './TreeComponent';
-import { Button } from './ui/button';
-import { isFolder, type BookmarkTreeNode } from '@/lib/tree/BookmarkTree';
-import { generateKeyBetween } from 'fractional-indexing';
+import React from "react";
+import { useBookmarkTreeSnapshot } from "@/hooks/useBookmarkTreeSnapshot";
+import {
+  TreeComponent,
+  type TreeOperations,
+  type TreeState,
+} from "./TreeComponent";
+import { Button } from "./ui/button";
+import { isFolder, type BookmarkTreeNode } from "@/lib/tree/BookmarkTree";
+import { generateKeyBetween } from "fractional-indexing";
 
 export const BookmarkTreeView: React.FC = () => {
   const {
@@ -22,11 +26,11 @@ export const BookmarkTreeView: React.FC = () => {
     createBookmark,
     removeNode,
     updateNode,
-    toggleFolder
+    toggleFolder,
   } = useBookmarkTreeSnapshot();
 
   const nodes = (tree?.nodes ?? {}) as Record<string, BookmarkTreeNode>;
-  const rootId = tree?.rootId ?? 'root';
+  const rootId = tree?.rootId ?? "root";
 
   // Modal state for creating items
   const [createFolderModal, setCreateFolderModal] = React.useState<{
@@ -34,7 +38,7 @@ export const BookmarkTreeView: React.FC = () => {
     parentId: string;
     index?: number;
     title: string;
-  }>({ open: false, parentId: rootId, index: undefined, title: '' });
+  }>({ open: false, parentId: rootId, index: undefined, title: "" });
 
   const [createBookmarkModal, setCreateBookmarkModal] = React.useState<{
     open: boolean;
@@ -42,38 +46,55 @@ export const BookmarkTreeView: React.FC = () => {
     index?: number;
     title: string;
     url: string;
-  }>({ open: false, parentId: rootId, index: undefined, title: '', url: '' });
+  }>({ open: false, parentId: rootId, index: undefined, title: "", url: "" });
 
   // Handlers for folder modal
-  const handleOpenCreateFolder = React.useCallback((parentId: string, index?: number) => {
-    setCreateFolderModal({ open: true, parentId, index, title: '' });
-  }, []);
+  const handleOpenCreateFolder = React.useCallback(
+    (parentId: string, index?: number) => {
+      setCreateFolderModal({ open: true, parentId, index, title: "" });
+    },
+    [],
+  );
 
   const handleConfirmCreateFolder = React.useCallback(async () => {
     const { parentId, index, title } = createFolderModal;
     if (!title.trim()) return; // basic validation
     await createFolder({ parentId, title: title.trim(), isOpen: true, index });
-    setCreateFolderModal(prev => ({ ...prev, open: false }));
+    setCreateFolderModal((prev) => ({ ...prev, open: false }));
   }, [createFolder, createFolderModal]);
 
   const handleCancelCreateFolder = React.useCallback(() => {
-    setCreateFolderModal(prev => ({ ...prev, open: false }));
+    setCreateFolderModal((prev) => ({ ...prev, open: false }));
   }, []);
 
   // Handlers for bookmark modal
-  const handleOpenCreateBookmark = React.useCallback((parentId: string, index?: number) => {
-    setCreateBookmarkModal({ open: true, parentId, index, title: '', url: '' });
-  }, []);
+  const handleOpenCreateBookmark = React.useCallback(
+    (parentId: string, index?: number) => {
+      setCreateBookmarkModal({
+        open: true,
+        parentId,
+        index,
+        title: "",
+        url: "",
+      });
+    },
+    [],
+  );
 
   const handleConfirmCreateBookmark = React.useCallback(async () => {
     const { parentId, index, title, url } = createBookmarkModal;
     if (!title.trim() || !url.trim()) return;
-    await createBookmark({ parentId, title: title.trim(), url: url.trim(), index });
-    setCreateBookmarkModal(prev => ({ ...prev, open: false }));
+    await createBookmark({
+      parentId,
+      title: title.trim(),
+      url: url.trim(),
+      index,
+    });
+    setCreateBookmarkModal((prev) => ({ ...prev, open: false }));
   }, [createBookmark, createBookmarkModal]);
 
   const handleCancelCreateBookmark = React.useCallback(() => {
-    setCreateBookmarkModal(prev => ({ ...prev, open: false }));
+    setCreateBookmarkModal((prev) => ({ ...prev, open: false }));
   }, []);
 
   // Adapt operations to ReusableTreeComponent contract
@@ -118,29 +139,44 @@ export const BookmarkTreeView: React.FC = () => {
       const target = nodes[targetFolderId];
       if (!target || !isFolder(target)) return;
       const children = target.children;
-      const i = typeof index === 'number' ? Math.max(0, Math.min(index, children.length)) : children.length;
+      const i =
+        typeof index === "number"
+          ? Math.max(0, Math.min(index, children.length))
+          : children.length;
       const leftId = i - 1 >= 0 ? children[i - 1] : null;
       const rightId = i < children.length ? children[i] : null;
       const leftKey = leftId ? nodes[leftId]?.orderKey || null : null;
       const rightKey = rightId ? nodes[rightId]?.orderKey || null : null;
       const newKey = generateKeyBetween(leftKey, rightKey);
       await updateNode({ nodeId, parentId: targetFolderId, orderKey: newKey });
-    }
+    },
   };
 
   const state: TreeState = {
     nodes,
     rootId,
-    operations: [] // optional; not used in snapshot view
+    operations: [], // optional; not used in snapshot view
   };
 
   if (error) {
     return (
-      <div className="p-4 border border-red-300 bg-red-50 rounded">
-        <p className="text-red-700 mb-2">SharedWorker Error: {error}</p>
+      <div className="rounded border border-red-300 bg-red-50 p-4">
+        <p className="mb-2 text-red-700">SharedWorker Error: {error}</p>
         <div className="flex gap-2">
-          <Button onClick={reconnect} variant="destructive" aria-label="Reconnect to SharedWorker">Reconnect</Button>
-          <Button onClick={reload} variant="outline" aria-label="Reload tree snapshot">Reload</Button>
+          <Button
+            onClick={reconnect}
+            variant="destructive"
+            aria-label="Reconnect to SharedWorker"
+          >
+            Reconnect
+          </Button>
+          <Button
+            onClick={reload}
+            variant="outline"
+            aria-label="Reload tree snapshot"
+          >
+            Reload
+          </Button>
         </div>
       </div>
     );
@@ -158,23 +194,58 @@ export const BookmarkTreeView: React.FC = () => {
 
       {/* Create Folder Modal */}
       {createFolderModal.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-modal="true" aria-label="Create folder dialog">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create folder dialog"
+        >
           <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-lg">
-            <h3 className="text-lg font-semibold mb-3">Create Folder</h3>
-            <label className="block text-sm text-gray-700 mb-1" htmlFor="folder-title">Folder name</label>
+            <h3 className="mb-3 text-lg font-semibold">Create Folder</h3>
+            <label
+              className="mb-1 block text-sm text-gray-700"
+              htmlFor="folder-title"
+            >
+              Folder name
+            </label>
             <input
               id="folder-title"
               type="text"
               value={createFolderModal.title}
-              onChange={(e) => setCreateFolderModal(prev => ({ ...prev, title: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === 'Enter') { void handleConfirmCreateFolder(); } if (e.key === 'Escape') { handleCancelCreateFolder(); } }}
-              className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={(e) =>
+                setCreateFolderModal((prev) => ({
+                  ...prev,
+                  title: e.target.value,
+                }))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  void handleConfirmCreateFolder();
+                }
+                if (e.key === "Escape") {
+                  handleCancelCreateFolder();
+                }
+              }}
+              className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
               placeholder="New Folder"
               autoFocus
             />
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="outline" onClick={handleCancelCreateFolder} aria-label="Cancel create folder" tabIndex={0}>Cancel</Button>
-              <Button onClick={() => void handleConfirmCreateFolder()} aria-label="Create folder" tabIndex={0}>Create</Button>
+              <Button
+                variant="outline"
+                onClick={handleCancelCreateFolder}
+                aria-label="Cancel create folder"
+                tabIndex={0}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleConfirmCreateFolder()}
+                aria-label="Create folder"
+                tabIndex={0}
+              >
+                Create
+              </Button>
             </div>
           </div>
         </div>
@@ -182,39 +253,91 @@ export const BookmarkTreeView: React.FC = () => {
 
       {/* Create Bookmark Modal */}
       {createBookmarkModal.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-modal="true" aria-label="Create bookmark dialog">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create bookmark dialog"
+        >
           <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-lg">
-            <h3 className="text-lg font-semibold mb-3">Create Bookmark</h3>
+            <h3 className="mb-3 text-lg font-semibold">Create Bookmark</h3>
             <div className="space-y-3">
               <div>
-                <label className="block text-sm text-gray-700 mb-1" htmlFor="bookmark-title">Title</label>
+                <label
+                  className="mb-1 block text-sm text-gray-700"
+                  htmlFor="bookmark-title"
+                >
+                  Title
+                </label>
                 <input
                   id="bookmark-title"
                   type="text"
                   value={createBookmarkModal.title}
-                  onChange={(e) => setCreateBookmarkModal(prev => ({ ...prev, title: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { void handleConfirmCreateBookmark(); } if (e.key === 'Escape') { handleCancelCreateBookmark(); } }}
-                  className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) =>
+                    setCreateBookmarkModal((prev) => ({
+                      ...prev,
+                      title: e.target.value,
+                    }))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      void handleConfirmCreateBookmark();
+                    }
+                    if (e.key === "Escape") {
+                      handleCancelCreateBookmark();
+                    }
+                  }}
+                  className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   placeholder="My link"
                   autoFocus
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-700 mb-1" htmlFor="bookmark-url">URL</label>
+                <label
+                  className="mb-1 block text-sm text-gray-700"
+                  htmlFor="bookmark-url"
+                >
+                  URL
+                </label>
                 <input
                   id="bookmark-url"
                   type="url"
                   value={createBookmarkModal.url}
-                  onChange={(e) => setCreateBookmarkModal(prev => ({ ...prev, url: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { void handleConfirmCreateBookmark(); } if (e.key === 'Escape') { handleCancelCreateBookmark(); } }}
-                  className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) =>
+                    setCreateBookmarkModal((prev) => ({
+                      ...prev,
+                      url: e.target.value,
+                    }))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      void handleConfirmCreateBookmark();
+                    }
+                    if (e.key === "Escape") {
+                      handleCancelCreateBookmark();
+                    }
+                  }}
+                  className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   placeholder="https://example.com"
                 />
               </div>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="outline" onClick={handleCancelCreateBookmark} aria-label="Cancel create bookmark" tabIndex={0}>Cancel</Button>
-              <Button onClick={() => void handleConfirmCreateBookmark()} aria-label="Create bookmark" tabIndex={0}>Create</Button>
+              <Button
+                variant="outline"
+                onClick={handleCancelCreateBookmark}
+                aria-label="Cancel create bookmark"
+                tabIndex={0}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleConfirmCreateBookmark()}
+                aria-label="Create bookmark"
+                tabIndex={0}
+              >
+                Create
+              </Button>
             </div>
           </div>
         </div>

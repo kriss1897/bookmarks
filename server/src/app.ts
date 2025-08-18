@@ -18,7 +18,11 @@ const eventsController = new EventsController(eventsManager);
 
 const operationsService = new OperationsService();
 const bookmarkService = new BookmarkService(operationsService);
-const bookmarkController = new BookmarkController(eventPublisher, bookmarkService, operationsService);
+const bookmarkController = new BookmarkController(
+  eventPublisher,
+  bookmarkService,
+  operationsService,
+);
 const operationsController = new OperationsController(eventPublisher, operationsService);
 
 // Middleware
@@ -35,7 +39,7 @@ app.get('/api/status', (req: Request, res: Response) => {
     message: 'Bookmarks API Server',
     version: '1.0.0',
     status: 'running',
-    sseConnections: eventsManager.getConnectionCount()
+    sseConnections: eventsManager.getConnectionCount(),
   });
 });
 
@@ -43,7 +47,7 @@ app.get('/api/status', (req: Request, res: Response) => {
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'healthy',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 

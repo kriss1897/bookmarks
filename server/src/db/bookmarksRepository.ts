@@ -15,7 +15,11 @@ export class BookmarksRepository {
   }
 
   async updateBookmark(nodeId: string, updates: Partial<NewBookmark>): Promise<Bookmark | null> {
-    const [updated] = await db.update(bookmarks).set(updates).where(eq(bookmarks.nodeId, nodeId)).returning();
+    const [updated] = await db
+      .update(bookmarks)
+      .set(updates)
+      .where(eq(bookmarks.nodeId, nodeId))
+      .returning();
     return updated || null;
   }
 }

@@ -18,12 +18,14 @@ export class EventPublisher implements IEventPublisher {
         type: eventType,
         message: data.message || `Event: ${eventType}`,
         timestamp: new Date().toISOString(),
-        ...data
+        ...data,
       },
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
-    console.log(`Publishing event: ${eventType} to ${this.eventsManager.getConnectionCount()} clients`);
+    console.log(
+      `Publishing event: ${eventType} to ${this.eventsManager.getConnectionCount()} clients`,
+    );
     this.eventsManager.broadcastEvent(event);
   }
 
@@ -36,7 +38,7 @@ export class EventPublisher implements IEventPublisher {
       type: data.type || 'operation',
       data: data,
       timestamp: new Date().toISOString(),
-      namespace
+      namespace,
     };
 
     console.log(`Publishing event to namespace "${namespace}": ${data.type}`);

@@ -1,8 +1,8 @@
-export type EventType = 
-  | 'connection' 
-  | 'operation' 
-  | 'sync_status' 
-  | 'conflict' 
+export type EventType =
+  | 'connection'
+  | 'operation'
+  | 'sync_status'
+  | 'conflict'
   | 'bookmark_created'
   | 'bookmark_updated'
   | 'bookmark_deleted'

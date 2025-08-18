@@ -3,7 +3,12 @@
  * Uses an abstract storage interface to support both in-memory and persistent storage.
  */
 
-import { BookmarkTree, createMemoryBookmarkTree, type NodeId, type BookmarkTreeNode } from "../tree";
+import {
+  BookmarkTree,
+  createMemoryBookmarkTree,
+  type NodeId,
+  type BookmarkTreeNode,
+} from "../tree";
 import type { OperationStorage } from "./storage";
 import { MemoryOperationStorage } from "./storage";
 
@@ -64,7 +69,10 @@ export type OpenFolderOp = { type: "open_folder"; folderId: NodeId };
 export type CloseFolderOp = { type: "close_folder"; folderId: NodeId };
 // Deprecated toggle operation removed; use explicit open_folder / close_folder ops
 export type RemoveNodeOp = { type: "remove_node"; nodeId: NodeId };
-export type MarkFolderLoadedOp = { type: "mark_folder_loaded"; folderId: NodeId };
+export type MarkFolderLoadedOp = {
+  type: "mark_folder_loaded";
+  folderId: NodeId;
+};
 export type HydrateNodeOp = {
   type: "hydrate_node";
   nodeId: NodeId;
@@ -72,7 +80,10 @@ export type HydrateNodeOp = {
   children: Record<string, unknown>[];
 };
 // Keep this for edge cases but don't use in main flow
-export type MarkFolderNotLoadedOp = { type: "mark_folder_not_loaded"; folderId: NodeId };
+export type MarkFolderNotLoadedOp = {
+  type: "mark_folder_not_loaded";
+  folderId: NodeId;
+};
 
 export type TreeOperation =
   | CreateFolderOp
@@ -126,7 +137,11 @@ export class TreeBuilder {
     this.storage = config.storage || new MemoryOperationStorage();
 
     // Store root node configuration for later use
-    this.rootNodeConfig = config.rootNode || { title: 'Bookmarks', id: 'root', isOpen: true };
+    this.rootNodeConfig = config.rootNode || {
+      title: "Bookmarks",
+      id: "root",
+      isOpen: true,
+    };
 
     // When auto-loading, don't create root node in constructor - handle it in initialize
     const shouldAutoLoad = config.autoLoad !== false;
@@ -134,18 +149,24 @@ export class TreeBuilder {
     // Create the new BookmarkTree instance
     this.bookmarkTree = createMemoryBookmarkTree({
       rootTitle: this.rootNodeConfig.title,
-      enableEvents: false
+      enableEvents: false,
     });
 
     // Handle legacy tree data migration if provided
     if (config.tree && !shouldAutoLoad) {
-      console.log('[TreeBuilder] Legacy tree data provided, will initialize after setup');
+      console.log(
+        "[TreeBuilder] Legacy tree data provided, will initialize after setup",
+      );
       // We'll handle this in initializeTree method
     }
 
     // Replay existing log if provided (only for non-auto-load scenarios)
     if (config.log?.length && !shouldAutoLoad) {
-      console.log('[TreeBuilder] Replaying provided log with', config.log.length, 'operations');
+      console.log(
+        "[TreeBuilder] Replaying provided log with",
+        config.log.length,
+        "operations",
+      );
       // Handle async replay after tree initialization
       this.initializeTree().then(() => {
         this.replay(config.log!, { record: false });
@@ -154,7 +175,7 @@ export class TreeBuilder {
 
     // Auto-load from storage if requested (default: true)
     if (shouldAutoLoad) {
-      console.log('[TreeBuilder] Auto-loading from storage');
+      console.log("[TreeBuilder] Auto-loading from storage");
       this.initialize();
     } else {
       // Initialize tree immediately for non-auto-load scenarios
@@ -167,14 +188,14 @@ export class TreeBuilder {
    */
   private async initializeTree(): Promise<void> {
     if (this.treeInitialized) {
-      console.log('[TreeBuilder] Tree is already initialized');
+      console.log("[TreeBuilder] Tree is already initialized");
       return;
-    };
+    }
 
     try {
       await this.bookmarkTree.initializeBookmarkTree({
-        rootTitle: this.rootNodeConfig.title || 'Bookmarks',
-        rootId: this.rootNodeConfig.id || 'root'
+        rootTitle: this.rootNodeConfig.title || "Bookmarks",
+        rootId: this.rootNodeConfig.id || "root",
       });
 
       this.treeInitialized = true;
@@ -183,9 +204,12 @@ export class TreeBuilder {
         this.isInitialized = true;
       }
 
-      console.log('[TreeBuilder] Tree initialized with root:', this.bookmarkTree.rootId);
+      console.log(
+        "[TreeBuilder] Tree initialized with root:",
+        this.bookmarkTree.rootId,
+      );
     } catch (error) {
-      console.error('[TreeBuilder] Failed to initialize tree:', error);
+      console.error("[TreeBuilder] Failed to initialize tree:", error);
       throw error;
     }
   }
@@ -193,35 +217,37 @@ export class TreeBuilder {
   /**
    * Initialize tree from persisted operations in storage
    */
-  async initialize(baselineOperations?: OperationEnvelope[], force?: boolean): Promise<void> {
+  async initialize(
+    baselineOperations?: OperationEnvelope[],
+    force?: boolean,
+  ): Promise<void> {
     if (!force && this.isInitialized) {
-      throw new Error('TreeBuilder is already initialized');
+      throw new Error("TreeBuilder is already initialized");
     }
 
-    console.log('[TreeBuilder] Initializing tree...');
+    console.log("[TreeBuilder] Initializing tree...");
 
     if (force) {
-      console.log('[TreeBuilder] Force reinitializing tree...');
-  // Important: await clear to ensure initialized flag resets before re-init
-  await this.bookmarkTree.clear();
+      console.log("[TreeBuilder] Force reinitializing tree...");
+      // Important: await clear to ensure initialized flag resets before re-init
+      await this.bookmarkTree.clear();
       this.treeInitialized = false;
 
       console.log(this.bookmarkTree);
     }
 
-
     try {
-      console.log('[TreeBuilder] Initializing from storage...');
+      console.log("[TreeBuilder] Initializing from storage...");
 
       // First initialize the tree
       await this.initializeTree();
 
-      console.log('bookmark tree', this.bookmarkTree);
+      console.log("bookmark tree", this.bookmarkTree);
 
       // Wait for storage to be ready
       const isReady = await this.storage.isReady();
       if (!isReady) {
-        throw new Error('Storage is not ready');
+        throw new Error("Storage is not ready");
       }
 
       if (baselineOperations) {
@@ -229,22 +255,28 @@ export class TreeBuilder {
       }
 
       const storedOperations = await this.storage.loadOperations();
-      console.log(`[TreeBuilder] Loaded ${storedOperations.length} operations from storage`);
+      console.log(
+        `[TreeBuilder] Loaded ${storedOperations.length} operations from storage`,
+      );
 
       if (storedOperations.length > 0) {
         // Clear current log and replay stored operations
         this.log.length = 0;
         this.replay(storedOperations, { record: true });
-        console.log('[TreeBuilder] Tree reconstructed from operation log');
+        console.log("[TreeBuilder] Tree reconstructed from operation log");
       } else {
-        console.log('[TreeBuilder] No stored operations found, creating and persisting root operation...');
+        console.log(
+          "[TreeBuilder] No stored operations found, creating and persisting root operation...",
+        );
       }
 
       this.isInitialized = true;
-      console.log('[TreeBuilder] Initialization complete. Root node ID:', this.bookmarkTree.rootId);
-
+      console.log(
+        "[TreeBuilder] Initialization complete. Root node ID:",
+        this.bookmarkTree.rootId,
+      );
     } catch (error) {
-      console.error('[TreeBuilder] Failed to initialize from storage:', error);
+      console.error("[TreeBuilder] Failed to initialize from storage:", error);
       this.isInitialized = true; // Mark as initialized even on error to prevent retries
       throw error;
     }
@@ -252,7 +284,11 @@ export class TreeBuilder {
 
   /** Append an operation to the log and apply it to the in-memory tree. */
   async dispatch(op: TreeOperation): Promise<OperationEnvelope> {
-    const env: OperationEnvelope = { id: this.generateOpId(), ts: Date.now(), op };
+    const env: OperationEnvelope = {
+      id: this.generateOpId(),
+      ts: Date.now(),
+      op,
+    };
     await this.apply(env);
     this.log.push(env);
     // Persist to storage
@@ -261,7 +297,10 @@ export class TreeBuilder {
   }
 
   /** Apply an operation envelope without re-recording it (unless record=true). */
-  async apply(env: OperationEnvelope, opts?: { record?: boolean }): Promise<void> {
+  async apply(
+    env: OperationEnvelope,
+    opts?: { record?: boolean },
+  ): Promise<void> {
     await this.applyOperation(env.op);
     if (opts?.record) this.log.push(env);
   }
@@ -274,7 +313,10 @@ export class TreeBuilder {
   }
 
   /** Apply a list of operations in order. Useful for rebuilding a tree from a log. */
-  async replay(envelopes: OperationEnvelope[], opts?: { record?: boolean }): Promise<void> {
+  async replay(
+    envelopes: OperationEnvelope[],
+    opts?: { record?: boolean },
+  ): Promise<void> {
     for (const env of envelopes) {
       await this.apply(env, opts);
     }
@@ -284,7 +326,9 @@ export class TreeBuilder {
   createFolder(op: Omit<CreateFolderOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "create_folder", ...op });
   }
-  createBookmark(op: Omit<CreateBookmarkOp, "type">): Promise<OperationEnvelope> {
+  createBookmark(
+    op: Omit<CreateBookmarkOp, "type">,
+  ): Promise<OperationEnvelope> {
     return this.dispatch({ type: "create_bookmark", ...op });
   }
   moveNode(op: Omit<MoveNodeOp, "type">): Promise<OperationEnvelope> {
@@ -308,10 +352,14 @@ export class TreeBuilder {
   removeNode(op: Omit<RemoveNodeOp, "type">): Promise<OperationEnvelope> {
     return this.dispatch({ type: "remove_node", ...op });
   }
-  markFolderNotLoaded(op: Omit<MarkFolderNotLoadedOp, "type">): Promise<OperationEnvelope> {
+  markFolderNotLoaded(
+    op: Omit<MarkFolderNotLoadedOp, "type">,
+  ): Promise<OperationEnvelope> {
     return this.dispatch({ type: "mark_folder_not_loaded", ...op });
   }
-  markFolderLoaded(op: Omit<MarkFolderLoadedOp, "type">): Promise<OperationEnvelope> {
+  markFolderLoaded(
+    op: Omit<MarkFolderLoadedOp, "type">,
+  ): Promise<OperationEnvelope> {
     return this.dispatch({ type: "mark_folder_loaded", ...op });
   }
   hydrateNode(op: Omit<HydrateNodeOp, "type">): Promise<OperationEnvelope> {
@@ -348,7 +396,7 @@ export class TreeBuilder {
         // After local creation, read back node to capture orderKey for server
         if (op.id) {
           const created = await this.bookmarkTree.getNode(op.id);
-          if (created && 'orderKey' in created) {
+          if (created && "orderKey" in created) {
             op.orderKey = (created as BookmarkTreeNode).orderKey;
           }
         }
@@ -368,12 +416,12 @@ export class TreeBuilder {
           parentId: op.parentId,
           title: op.title,
           url: op.url,
-          index: op.index
+          index: op.index,
         });
 
         if (op.id) {
           const created = await this.bookmarkTree.getNode(op.id);
-          if (created && 'orderKey' in created) {
+          if (created && "orderKey" in created) {
             op.orderKey = (created as BookmarkTreeNode).orderKey;
           }
         }
@@ -395,8 +443,11 @@ export class TreeBuilder {
           throw new Error(`update_node: node not found ${op.nodeId}`);
         }
         const oldParentId = current.parentId || null;
-        const newParentId = op.parentId !== undefined ? op.parentId : oldParentId;
-        const updated: BookmarkTreeNode = { ...(current as BookmarkTreeNode) } as BookmarkTreeNode;
+        const newParentId =
+          op.parentId !== undefined ? op.parentId : oldParentId;
+        const updated: BookmarkTreeNode = {
+          ...(current as BookmarkTreeNode),
+        } as BookmarkTreeNode;
         if (op.parentId !== undefined) {
           updated.parentId = (newParentId ?? null) as string | null;
         }
@@ -407,18 +458,24 @@ export class TreeBuilder {
         // Refresh children arrays for affected parents
         if (oldParentId && oldParentId !== newParentId) {
           const oldFolder = await this.bookmarkTree.getNode(oldParentId);
-          if (oldFolder && (oldFolder as BookmarkTreeNode).kind === 'folder') {
+          if (oldFolder && (oldFolder as BookmarkTreeNode).kind === "folder") {
             const ch = await this.bookmarkTree.getChildren(oldParentId);
-            await this.bookmarkTree.setNode({ ...(oldFolder as BookmarkTreeNode), children: ch.map(c => c.id) } as BookmarkTreeNode);
+            await this.bookmarkTree.setNode({
+              ...(oldFolder as BookmarkTreeNode),
+              children: ch.map((c) => c.id),
+            } as BookmarkTreeNode);
           }
         }
 
         if (newParentId) {
           const newFolder = await this.bookmarkTree.getNode(newParentId);
-        
-          if (newFolder && (newFolder as BookmarkTreeNode).kind === 'folder') {
+
+          if (newFolder && (newFolder as BookmarkTreeNode).kind === "folder") {
             const ch = await this.bookmarkTree.getChildren(newParentId);
-            await this.bookmarkTree.setNode({ ...(newFolder as BookmarkTreeNode), children: ch.map(c => c.id) } as BookmarkTreeNode);
+            await this.bookmarkTree.setNode({
+              ...(newFolder as BookmarkTreeNode),
+              children: ch.map((c) => c.id),
+            } as BookmarkTreeNode);
           }
         }
         break;
@@ -431,7 +488,7 @@ export class TreeBuilder {
         await this.bookmarkTree.closeFolder(op.folderId);
         break;
       }
-  // toggle_folder removed - use open_folder / close_folder explicitly
+      // toggle_folder removed - use open_folder / close_folder explicitly
       case "remove_node": {
         await this.bookmarkTree.remove(op.nodeId);
         break;
@@ -453,7 +510,7 @@ export class TreeBuilder {
             // Ensure these critical properties are preserved
             id: currentNode.id,
             parentId: currentNode.parentId,
-            createdAt: currentNode.createdAt
+            createdAt: currentNode.createdAt,
           } as BookmarkTreeNode;
 
           await this.bookmarkTree.setNode(updatedNode);
@@ -470,11 +527,16 @@ export class TreeBuilder {
         }
 
         // Update the parent-child relationship for the hydrated folder and mark as loaded
-        if (currentNode?.kind === 'folder') {
+        if (currentNode?.kind === "folder") {
           // set children gathered above if any
-          const refreshed = await this.bookmarkTree.getNode(op.nodeId) as BookmarkTreeNode | undefined;
-          if (refreshed && 'children' in refreshed) {
-            await this.bookmarkTree.setNode({ ...refreshed, children: directChildIds } as BookmarkTreeNode);
+          const refreshed = (await this.bookmarkTree.getNode(op.nodeId)) as
+            | BookmarkTreeNode
+            | undefined;
+          if (refreshed && "children" in refreshed) {
+            await this.bookmarkTree.setNode({
+              ...refreshed,
+              children: directChildIds,
+            } as BookmarkTreeNode);
           }
           await this.bookmarkTree.markFolderAsLoaded(op.nodeId);
         }
@@ -493,6 +555,10 @@ export class TreeBuilder {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const g: any = globalThis as any;
     if (g?.crypto?.randomUUID) return g.crypto.randomUUID();
-    return "op-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+    return (
+      "op-" +
+      Math.random().toString(36).slice(2, 10) +
+      Date.now().toString(36).slice(-4)
+    );
   }
 }

@@ -15,16 +15,36 @@ export const HeaderSyncIndicator: React.FC = () => {
 
   const { icon, color, title, spinning } = React.useMemo(() => {
     if (!syncStatus?.isConnected) {
-      return { icon: <WifiOff className="size-4" />, color: "text-red-600", title: error ? `Sync error: ${error}` : "Disconnected", spinning: false };
+      return {
+        icon: <WifiOff className="size-4" />,
+        color: "text-red-600",
+        title: error ? `Sync error: ${error}` : "Disconnected",
+        spinning: false,
+      };
     }
     if (syncStatus.isSyncing || isLoading) {
-      return { icon: <Loader2 className="size-4" />, color: "text-blue-600", title: "Syncing…", spinning: true };
+      return {
+        icon: <Loader2 className="size-4" />,
+        color: "text-blue-600",
+        title: "Syncing…",
+        spinning: true,
+      };
     }
     if (syncStatus.failedCount && syncStatus.failedCount > 0) {
       const t = `${syncStatus.failedCount} failed • Click to retry`;
-      return { icon: <TriangleAlert className="size-4" />, color: "text-yellow-600", title: t, spinning: false };
+      return {
+        icon: <TriangleAlert className="size-4" />,
+        color: "text-yellow-600",
+        title: t,
+        spinning: false,
+      };
     }
-    return { icon: <CheckCircle2 className="size-4" />, color: "text-green-600", title: "Synced", spinning: false };
+    return {
+      icon: <CheckCircle2 className="size-4" />,
+      color: "text-green-600",
+      title: "Synced",
+      spinning: false,
+    };
   }, [syncStatus, isLoading, error]);
 
   return (
@@ -36,7 +56,15 @@ export const HeaderSyncIndicator: React.FC = () => {
       title={title}
       className="relative"
     >
-      <span className={"transition-transform " + (spinning ? "animate-spin" : "") + " " + color} aria-hidden>
+      <span
+        className={
+          "transition-transform " +
+          (spinning ? "animate-spin" : "") +
+          " " +
+          color
+        }
+        aria-hidden
+      >
         {icon}
       </span>
       <span className="sr-only">Sync status</span>

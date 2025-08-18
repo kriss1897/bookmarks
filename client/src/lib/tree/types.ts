@@ -18,13 +18,15 @@ export interface SerializedTree<T extends BaseTreeNode = BaseTreeNode> {
 }
 
 export interface TreeChangeEvent<T extends BaseTreeNode = BaseTreeNode> {
-  type: 'nodeAdded' | 'nodeUpdated' | 'nodeRemoved' | 'treeClear';
+  type: "nodeAdded" | "nodeUpdated" | "nodeRemoved" | "treeClear";
   nodeId?: NodeId;
   node?: T;
   previousNode?: T;
 }
 
-export type TreeChangeListener<T extends BaseTreeNode = BaseTreeNode> = (event: TreeChangeEvent<T>) => void;
+export type TreeChangeListener<T extends BaseTreeNode = BaseTreeNode> = (
+  event: TreeChangeEvent<T>,
+) => void;
 
 /**
  * Configuration for tree initialization

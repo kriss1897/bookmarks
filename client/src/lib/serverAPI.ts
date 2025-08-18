@@ -2,8 +2,8 @@
  * Server API interface for fetching bookmark data and applying operations
  */
 
-import type { BookmarkTreeNode, NodeId } from './tree';
-import type { OperationEnvelope } from './builder/treeBuilder';
+import type { BookmarkTreeNode, NodeId } from "./tree";
+import type { OperationEnvelope } from "./builder/treeBuilder";
 
 interface NodeWithChildren {
   node: Partial<BookmarkTreeNode>; // Server returns partial data to update existing node
@@ -24,9 +24,9 @@ interface ServerAPIConfig {
 }
 
 const DEFAULT_CONFIG: ServerAPIConfig = {
-  baseURL: 'http://localhost:5000',
-  namespace: 'default',
-  timeout: 5000
+  baseURL: "http://localhost:5000",
+  namespace: "default",
+  timeout: 5000,
 };
 
 /**
@@ -50,7 +50,7 @@ export class ServerAPI {
    */
   static async fetchNodeWithChildren(
     nodeId: NodeId,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal },
   ): Promise<NodeWithChildren> {
     const url = `${this.config.baseURL}/api/${this.config.namespace}/tree/node/${nodeId}`;
 
@@ -58,9 +58,9 @@ export class ServerAPI {
 
     try {
       const response = await fetch(url, {
-        method: 'GET',
+        method: "GET",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         signal: options?.signal,
       });
@@ -72,7 +72,7 @@ export class ServerAPI {
       const result = await response.json();
 
       if (!result.success) {
-        throw new Error(result.message || 'Server returned error');
+        throw new Error(result.message || "Server returned error");
       }
 
       // Transform server response to expected format
@@ -92,37 +92,42 @@ export class ServerAPI {
       // Process all nodes except the main node
       for (const node of Object.values(nodes) as Record<string, unknown>[]) {
         if (node.id !== rootNodeId) {
-          children.push(this.transformServerNode(node as Record<string, unknown>));
+          children.push(
+            this.transformServerNode(node as Record<string, unknown>),
+          );
         }
       }
 
       // Transform main node to partial format for hydration
       // The children array for the main node should be only its direct children
-      const directChildren = children.filter(child => child.parentId === rootNodeId);
+      const directChildren = children.filter(
+        (child) => child.parentId === rootNodeId,
+      );
 
       const nodeData: Partial<BookmarkTreeNode> = {
         id: mainNode.id,
         title: mainNode.title,
         updatedAt: mainNode.updatedAt,
-        ...(mainNode.kind === 'folder' && {
+        ...(mainNode.kind === "folder" && {
           isOpen: mainNode.isOpen,
           isLoaded: true,
-          children: directChildren.map(child => child.id)
+          children: directChildren.map((child) => child.id),
         }),
-        ...(mainNode.kind === 'bookmark' && {
+        ...(mainNode.kind === "bookmark" && {
           url: mainNode.url,
           description: mainNode.description,
-          favicon: mainNode.favicon
-        })
+          favicon: mainNode.favicon,
+        }),
       };
 
-      console.log(`[ServerAPI] Successfully fetched node ${nodeId} with ${children.length} total children (${directChildren.length} direct)`);
+      console.log(
+        `[ServerAPI] Successfully fetched node ${nodeId} with ${children.length} total children (${directChildren.length} direct)`,
+      );
 
       return {
         node: nodeData,
-        children // Return ALL children, not just direct children
+        children, // Return ALL children, not just direct children
       };
-
     } catch (error) {
       console.error(`[ServerAPI] Failed to fetch node ${nodeId}:`, error);
       throw error;
@@ -132,34 +137,36 @@ export class ServerAPI {
   /**
    * Transform server node format to client format
    */
-  private static transformServerNode(serverNode: Record<string, unknown>): BookmarkTreeNode {
+  private static transformServerNode(
+    serverNode: Record<string, unknown>,
+  ): BookmarkTreeNode {
     const baseNode = {
       id: serverNode.id as string,
       parentId: serverNode.parentId as string | null,
-      kind: serverNode.kind as 'bookmark' | 'folder',
+      kind: serverNode.kind as "bookmark" | "folder",
       title: serverNode.title as string,
       createdAt: serverNode.createdAt as number,
       updatedAt: serverNode.updatedAt as number,
-      orderKey: serverNode.orderKey as string
+      orderKey: serverNode.orderKey as string,
     };
 
-    if (serverNode.kind === 'folder') {
+    if (serverNode.kind === "folder") {
       return {
         ...baseNode,
-        kind: 'folder',
+        kind: "folder",
         isOpen: (serverNode.isOpen as boolean) || false,
         // Important: non-root folders included in another node's payload should NOT be marked loaded,
         // otherwise opening them won't trigger hydration. We'll mark only the main fetched node as loaded
         // via nodeData in fetchNodeWithChildren().
         isLoaded: false,
         // Children for non-root nodes will be populated on dedicated hydration for that node
-        children: []
+        children: [],
       };
     } else {
       return {
         ...baseNode,
-        kind: 'bookmark',
-        url: (serverNode.url as string) || ''
+        kind: "bookmark",
+        url: (serverNode.url as string) || "",
       };
     }
   }
@@ -172,22 +179,26 @@ export class ServerAPI {
    */
   static async applyOperation(
     operation: OperationEnvelope,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal },
   ): Promise<OperationResult> {
     // Validate operation
     if (!operation?.id || !operation?.op?.type) {
-      throw new Error('Invalid operation: missing id or operation type');
+      throw new Error("Invalid operation: missing id or operation type");
     }
 
     const url = `${this.config.baseURL}/api/${this.config.namespace}/operations/apply`;
 
-    console.log(`[ServerAPI] Applying operation to server:`, operation.id, operation.op.type);
+    console.log(
+      `[ServerAPI] Applying operation to server:`,
+      operation.id,
+      operation.op.type,
+    );
 
     try {
       const response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify(operation),
         signal: options?.signal,
@@ -200,11 +211,14 @@ export class ServerAPI {
       const result = await response.json();
 
       if (!result.success) {
-        console.warn(`[ServerAPI] Server rejected operation ${operation.id}:`, result.error);
+        console.warn(
+          `[ServerAPI] Server rejected operation ${operation.id}:`,
+          result.error,
+        );
         return {
           success: false,
           operationId: operation.id,
-          error: result.error || 'Server rejected operation'
+          error: result.error || "Server rejected operation",
         };
       }
 
@@ -212,11 +226,13 @@ export class ServerAPI {
       return {
         success: true,
         operationId: operation.id,
-        message: result.message || 'Operation applied successfully'
+        message: result.message || "Operation applied successfully",
       };
-
     } catch (error) {
-      console.error(`[ServerAPI] Failed to apply operation ${operation.id}:`, error);
+      console.error(
+        `[ServerAPI] Failed to apply operation ${operation.id}:`,
+        error,
+      );
       throw error;
     }
   }

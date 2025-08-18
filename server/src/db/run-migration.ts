@@ -4,7 +4,7 @@ import { sql } from 'drizzle-orm';
 async function runCustomMigration() {
   try {
     console.log('Running custom namespace migration...');
-    
+
     // Create new tables with namespace support
     await db.run(sql`
       CREATE TABLE IF NOT EXISTS nodes_new (

@@ -13,14 +13,18 @@ export const nodes = sqliteTable('nodes', {
 
 // Folders table - stores folder-specific properties
 export const folders = sqliteTable('folders', {
-  nodeId: text('node_id').primaryKey().references(() => nodes.id, { onDelete: 'cascade' }),
+  nodeId: text('node_id')
+    .primaryKey()
+    .references(() => nodes.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   isOpen: integer('is_open', { mode: 'boolean' }).notNull().default(true),
 });
 
 // Bookmarks table - stores bookmark-specific properties
 export const bookmarks = sqliteTable('bookmarks', {
-  nodeId: text('node_id').primaryKey().references(() => nodes.id, { onDelete: 'cascade' }),
+  nodeId: text('node_id')
+    .primaryKey()
+    .references(() => nodes.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   url: text('url').notNull(),
   description: text('description'), // Optional description
@@ -31,8 +35,8 @@ export const bookmarks = sqliteTable('bookmarks', {
 export const operations = sqliteTable('operations', {
   id: text('id').primaryKey(),
   namespace: text('namespace').notNull(), // Namespace for the operation
-  type: text('type', { 
-    enum: ['create', 'update', 'delete', 'move'] 
+  type: text('type', {
+    enum: ['create', 'update', 'delete', 'move'],
   }).notNull(),
   nodeId: text('node_id').notNull(),
   data: text('data'), // JSON string of the operation data

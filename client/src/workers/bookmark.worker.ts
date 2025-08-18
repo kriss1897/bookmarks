@@ -3,27 +3,43 @@
  * Manages bookmark tree state and operations across multiple tabs
  */
 
-import * as Comlink from 'comlink';
-import { createPersistentTreeBuilder } from '../lib/builder/treeBuilderFactory';
-import type { TreeBuilder, OperationEnvelope } from '../lib/builder/treeBuilderFactory';
-import type { CreateFolderOp, CreateBookmarkOp } from '../lib/builder/treeBuilder';
-import type { SharedWorkerAPI, BroadcastMessage, TabConnection } from './sharedWorkerAPI';
-import type { NodeId, BookmarkTreeNode as TreeNode } from '@/lib/tree';
-import { SSEManager } from '../lib/sse/SSEManager';
-import type { ServerEvent, SSEConnectionState } from '../types/sse';
-import { convertServerEventToEnvelope, validateServerEventData } from '../lib/sseEventConverter';
-import { ServerAPI } from '../lib/serverAPI';
-import { ServerSyncService } from '../lib/ServerSyncService';
-import { databaseService } from './database';
+import * as Comlink from "comlink";
+import { createPersistentTreeBuilder } from "../lib/builder/treeBuilderFactory";
+import type {
+  TreeBuilder,
+  OperationEnvelope,
+} from "../lib/builder/treeBuilderFactory";
+import type {
+  CreateFolderOp,
+  CreateBookmarkOp,
+} from "../lib/builder/treeBuilder";
+import type {
+  SharedWorkerAPI,
+  BroadcastMessage,
+  TabConnection,
+} from "./sharedWorkerAPI";
+import type { NodeId, BookmarkTreeNode as TreeNode } from "@/lib/tree";
+import { SSEManager } from "../lib/sse/SSEManager";
+import type { ServerEvent, SSEConnectionState } from "../types/sse";
+import {
+  convertServerEventToEnvelope,
+  validateServerEventData,
+} from "../lib/sseEventConverter";
+import { ServerAPI } from "../lib/serverAPI";
+import { ServerSyncService } from "../lib/ServerSyncService";
+import { databaseService } from "./database";
 
 class BookmarkSharedWorker implements SharedWorkerAPI {
   private builder: TreeBuilder;
   private connections = new Map<string, TabConnection>();
-  private broadcastChannel = new BroadcastChannel('bookmarks-sync');
-  private sseBroadcastChannel = new BroadcastChannel('bookmarks-sse');
+  private broadcastChannel = new BroadcastChannel("bookmarks-sync");
+  private sseBroadcastChannel = new BroadcastChannel("bookmarks-sse");
   private sseManager: SSEManager | null = null;
-  private sseState: SSEConnectionState = { connected: false, connecting: false };
-  private namespace = 'default'; // Use tree root ID as namespace
+  private sseState: SSEConnectionState = {
+    connected: false,
+    connecting: false,
+  };
+  private namespace = "default"; // Use tree root ID as namespace
   private serverSyncService: ServerSyncService;
   private lastHydrationTime = 0; // Track last hydration to prevent duplicates
 
@@ -31,45 +47,49 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   private serverBaselineTimestamp = 0; // Last known server state timestamp
 
   constructor() {
-    console.log('[SharedWorker] BookmarkSharedWorker initialized');
+    console.log("[SharedWorker] BookmarkSharedWorker initialized");
 
     // Configure ServerAPI with correct settings
     ServerAPI.configure({
-      baseURL: 'http://localhost:5000',
+      baseURL: "http://localhost:5000",
       namespace: this.namespace,
-      timeout: 5000
+      timeout: 5000,
     });
 
     // Create TreeBuilder with persistent storage
     // Initialization happens automatically with autoLoad: true (default)
     this.builder = createPersistentTreeBuilder({
-      rootNode: { title: 'Bookmarks', id: 'root', isOpen: true }
+      rootNode: { title: "Bookmarks", id: "root", isOpen: true },
     });
 
     // Initialize server sync service with callbacks
-    this.serverSyncService = new ServerSyncService(databaseService, {}, {
-      onStatusChange: (status) => {
-        this.broadcast({
-          type: 'sync_status_changed',
-          isSyncing: status.isSyncing,
-          pendingCount: status.pendingCount,
-          failedCount: status.failedCount
-        });
-      },
-      onOperationSynced: (operationId, success, error) => {
-        // Mark operation as synced if successful
-        if (success) {
-          this.markOperationSynced(operationId);
-        }
+    this.serverSyncService = new ServerSyncService(
+      databaseService,
+      {},
+      {
+        onStatusChange: (status) => {
+          this.broadcast({
+            type: "sync_status_changed",
+            isSyncing: status.isSyncing,
+            pendingCount: status.pendingCount,
+            failedCount: status.failedCount,
+          });
+        },
+        onOperationSynced: (operationId, success, error) => {
+          // Mark operation as synced if successful
+          if (success) {
+            this.markOperationSynced(operationId);
+          }
 
-        this.broadcast({
-          type: 'operation_sync_completed',
-          operationId,
-          success,
-          error
-        });
-      }
-    });
+          this.broadcast({
+            type: "operation_sync_completed",
+            operationId,
+            success,
+            error,
+          });
+        },
+      },
+    );
   }
 
   // Ensure initialization is complete before operations
@@ -84,9 +104,11 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     this.connections.set(tabId, {
       id: tabId,
       connectedAt: now,
-      lastPing: now
+      lastPing: now,
     });
-    console.log(`[SharedWorker] Tab ${tabId} connected. Active connections: ${this.connections.size}`);
+    console.log(
+      `[SharedWorker] Tab ${tabId} connected. Active connections: ${this.connections.size}`,
+    );
 
     // Initialize SSE connection when first tab connects
     if (this.connections.size === 1 && !this.sseManager) {
@@ -96,7 +118,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
   async disconnect(tabId: string): Promise<void> {
     this.connections.delete(tabId);
-    console.log(`[SharedWorker] Tab ${tabId} disconnected. Active connections: ${this.connections.size}`);
+    console.log(
+      `[SharedWorker] Tab ${tabId} disconnected. Active connections: ${this.connections.size}`,
+    );
 
     // Disconnect SSE when last tab disconnects
     if (this.connections.size === 0 && this.sseManager) {
@@ -107,17 +131,17 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   // SSE Management
   private async initializeSSE(): Promise<void> {
     if (this.sseManager) {
-      console.log('[SharedWorker] SSE already initialized');
+      console.log("[SharedWorker] SSE already initialized");
       return;
     }
 
-    console.log('[SharedWorker] Initializing SSE connection');
+    console.log("[SharedWorker] Initializing SSE connection");
 
     this.sseManager = new SSEManager(
-      '/api/events',
+      "/api/events",
       this.namespace,
       this.handleServerEvent.bind(this),
-      this.handleSSEStateChange.bind(this)
+      this.handleSSEStateChange.bind(this),
     );
 
     this.sseManager.connect();
@@ -125,25 +149,27 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
   private disconnectSSE(): void {
     if (this.sseManager) {
-      console.log('[SharedWorker] Disconnecting SSE');
+      console.log("[SharedWorker] Disconnecting SSE");
       this.sseManager.disconnect();
       this.sseManager = null;
     }
   }
 
   private handleServerEvent(event: ServerEvent): void {
-    console.log('[SharedWorker] Received SSE event:', event);
+    console.log("[SharedWorker] Received SSE event:", event);
 
     // Broadcast server event to all connected tabs via SSE channel
     this.broadcastSSE({
-      type: 'server_event',
-      event
+      type: "server_event",
+      event,
     });
 
     // Support both legacy typed events and new 'operation' envelope events
-    const hasOpEnvelope = (event as unknown as { data?: { op?: { type?: string } } }).data?.op?.type;
+    const hasOpEnvelope = (
+      event as unknown as { data?: { op?: { type?: string } } }
+    ).data?.op?.type;
 
-    if (event.type === 'operation' || hasOpEnvelope) {
+    if (event.type === "operation" || hasOpEnvelope) {
       // New server format: { type: 'operation', data: { id, ts, op: { type, ... } } }
       this.handleServerDataEvent(event);
       return;
@@ -151,29 +177,31 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
     // Legacy typed events coming directly as event.type
     switch (event.type) {
-      case 'bookmark_created':
-      case 'folder_created':
-      case 'bookmark_updated':
-      case 'folder_updated':
-      case 'bookmark_deleted':
-      case 'folder_deleted':
-      case 'item_moved':
-      case 'open_folder':
-      case 'close_folder':
+      case "bookmark_created":
+      case "folder_created":
+      case "bookmark_updated":
+      case "folder_updated":
+      case "bookmark_deleted":
+      case "folder_deleted":
+      case "item_moved":
+      case "open_folder":
+      case "close_folder":
         this.handleServerDataEvent(event);
         return;
       default:
-        console.log(`[SharedWorker] Unhandled server event type: ${event.type}`);
+        console.log(
+          `[SharedWorker] Unhandled server event type: ${event.type}`,
+        );
         return;
     }
   }
 
   private async handleServerDataEvent(event: ServerEvent): Promise<void> {
-    console.log('[SharedWorker] Handling server data event:', event.type);
+    console.log("[SharedWorker] Handling server data event:", event.type);
 
     // Validate event data before processing
     if (!validateServerEventData(event)) {
-      console.error('[SharedWorker] Invalid server event data:', event);
+      console.error("[SharedWorker] Invalid server event data:", event);
       return;
     }
 
@@ -181,73 +209,83 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       // Convert server event to operation envelope
       const envelope = convertServerEventToEnvelope(event);
       if (!envelope) {
-        console.warn('[SharedWorker] Could not convert server event to operation:', event.type);
+        console.warn(
+          "[SharedWorker] Could not convert server event to operation:",
+          event.type,
+        );
         return;
       }
 
-      console.log('[SharedWorker] Applying remote operation:', envelope);
+      console.log("[SharedWorker] Applying remote operation:", envelope);
 
       // Apply the operation to the TreeBuilder
       // Note: record=true ensures the remote operation is persisted locally
       await this.builder.apply(envelope, { record: true });
 
-      console.log('[SharedWorker] Remote operation applied successfully');
+      console.log("[SharedWorker] Remote operation applied successfully");
 
       // Broadcast the applied operation to all tabs via regular channel
       // This allows tabs to update their UI to reflect the server change
       this.broadcast({
-        type: 'operation_processed',
-        operation: envelope
+        type: "operation_processed",
+        operation: envelope,
       });
 
       // Also broadcast via SSE channel for any SSE-specific handling
       this.broadcastSSE({
-        type: 'server_data_update',
+        type: "server_data_update",
         operation: {
           type: event.type,
           data: event.data,
           timestamp: event.timestamp,
-          envelope // Include the full envelope for debugging
-        }
+          envelope, // Include the full envelope for debugging
+        },
       });
-
     } catch (error) {
-      console.error('[SharedWorker] Failed to apply remote operation:', error, event);
+      console.error(
+        "[SharedWorker] Failed to apply remote operation:",
+        error,
+        event,
+      );
 
       // Broadcast error so tabs can handle it appropriately
       this.broadcastSSE({
-        type: 'server_event_error',
-        error: error instanceof Error ? error.message : 'Unknown error',
-        event
+        type: "server_event_error",
+        error: error instanceof Error ? error.message : "Unknown error",
+        event,
       });
     }
   }
 
   private handleSSEStateChange(state: SSEConnectionState): void {
     this.sseState = state;
-    console.log('[SharedWorker] SSE state changed:', state);
+    console.log("[SharedWorker] SSE state changed:", state);
 
     // Start/stop server sync based on connection state
     if (state.connected) {
       // Trigger root node hydration on connection/reconnection
-      this.hydrateRootNode().then(() => {
-        console.log('[SharedWorker] SSE connected, starting server sync');
-        this.serverSyncService.startSync()
-          .catch(error => {
-            console.error('[SharedWorker] Failed to start server sync:', error);
+      this.hydrateRootNode()
+        .then(() => {
+          console.log("[SharedWorker] SSE connected, starting server sync");
+          this.serverSyncService.startSync().catch((error) => {
+            console.error("[SharedWorker] Failed to start server sync:", error);
           });
-      }).catch((error: Error) => {
-        console.error('[SharedWorker] Failed to hydrate root node on SSE connection:', error);
-      });
+        })
+        .catch((error: Error) => {
+          console.error(
+            "[SharedWorker] Failed to hydrate root node on SSE connection:",
+            error,
+          );
+        });
     } else {
-      console.log('[SharedWorker] SSE disconnected, stopping server sync');
+      console.log("[SharedWorker] SSE disconnected, stopping server sync");
       // this.serverSyncService.stopSync();
     }
 
     // Broadcast SSE state to all connected tabs via SSE channel
     this.broadcastSSE({
-      type: 'sse_state_changed',
-      state
+      type: "sse_state_changed",
+      state,
     });
   }
 
@@ -257,7 +295,11 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   }
 
   // Server Sync Management
-  async getSyncStatus(): Promise<{ isSyncing: boolean; pendingCount?: number; failedCount?: number }> {
+  async getSyncStatus(): Promise<{
+    isSyncing: boolean;
+    pendingCount?: number;
+    failedCount?: number;
+  }> {
     const syncStatus = this.serverSyncService.getSyncStatus();
 
     if (syncStatus.isSyncing) {
@@ -268,7 +310,7 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       return {
         isSyncing: true,
         pendingCount: pendingOps.length,
-        failedCount: failedOps.length
+        failedCount: failedOps.length,
       };
     }
 
@@ -292,16 +334,21 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       return;
     }
 
-    this.serverSyncService.syncOperationImmediately(operationId).catch(error => {
-      console.warn(`[SharedWorker] Failed to immediately sync operation ${operationId}:`, error);
-      // Don't throw - this is a best-effort sync
-      // The operation will be synced later during batch sync
-    });
+    this.serverSyncService
+      .syncOperationImmediately(operationId)
+      .catch((error) => {
+        console.warn(
+          `[SharedWorker] Failed to immediately sync operation ${operationId}:`,
+          error,
+        );
+        // Don't throw - this is a best-effort sync
+        // The operation will be synced later during batch sync
+      });
   }
 
   // Cleanup method - can be called by the application when needed
   public async cleanup(): Promise<void> {
-    console.log('[SharedWorker] Cleaning up SharedWorker resources');
+    console.log("[SharedWorker] Cleaning up SharedWorker resources");
 
     this.serverSyncService.destroy();
     this.disconnectSSE();
@@ -317,7 +364,14 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   }
 
   // Tree Operations
-  async createFolder(params: { parentId?: NodeId; title: string; isOpen?: boolean; isLoaded?: boolean; id?: NodeId; index?: number }): Promise<NodeId> {
+  async createFolder(params: {
+    parentId?: NodeId;
+    title: string;
+    isOpen?: boolean;
+    isLoaded?: boolean;
+    id?: NodeId;
+    index?: number;
+  }): Promise<NodeId> {
     await this.ensureInitialized();
 
     // Generate ID here if not provided to ensure we can track it
@@ -325,23 +379,28 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
     // Create operation with explicit properties to ensure nodeId is included
     const createFolderOp: CreateFolderOp = {
-      type: 'create_folder',
+      type: "create_folder",
       id: nodeId,
       parentId: params.parentId,
       title: params.title,
       isOpen: params.isOpen ?? false, // New folders are closed by default
       isLoaded: params.isLoaded ?? false, // New folders need to be loaded from server
-      index: params.index
+      index: params.index,
     };
 
     const operation = await this.builder.dispatch(createFolderOp);
 
-    console.log('[SharedWorker] Created folder:', params.title, 'with nodeId:', nodeId);
+    console.log(
+      "[SharedWorker] Created folder:",
+      params.title,
+      "with nodeId:",
+      nodeId,
+    );
 
     // Broadcast operation_processed so clients can apply the operation
     this.broadcast({
-      type: 'operation_processed',
-      operation
+      type: "operation_processed",
+      operation,
     });
 
     // Try to sync immediately if connected
@@ -350,7 +409,13 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     return nodeId;
   }
 
-  async createBookmark(params: { parentId?: NodeId; title: string; url: string; id?: NodeId; index?: number }): Promise<NodeId> {
+  async createBookmark(params: {
+    parentId?: NodeId;
+    title: string;
+    url: string;
+    id?: NodeId;
+    index?: number;
+  }): Promise<NodeId> {
     await this.ensureInitialized();
 
     // Generate ID here if not provided to ensure we can track it
@@ -358,22 +423,27 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
     // Create operation with explicit properties to ensure nodeId is included
     const createBookmarkOp: CreateBookmarkOp = {
-      type: 'create_bookmark',
+      type: "create_bookmark",
       id: nodeId,
       parentId: params.parentId,
       title: params.title,
       url: params.url,
-      index: params.index
+      index: params.index,
     };
 
     const operation = await this.builder.dispatch(createBookmarkOp);
 
-    console.log('[SharedWorker] Created bookmark:', params.title, 'with nodeId:', nodeId);
+    console.log(
+      "[SharedWorker] Created bookmark:",
+      params.title,
+      "with nodeId:",
+      nodeId,
+    );
 
     // Broadcast operation_processed so clients can apply the operation
     this.broadcast({
-      type: 'operation_processed',
-      operation
+      type: "operation_processed",
+      operation,
     });
 
     // Try to sync immediately if connected
@@ -386,13 +456,13 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     await this.ensureInitialized();
 
     const operation = await this.builder.dispatch({
-      type: 'remove_node',
-      nodeId
+      type: "remove_node",
+      nodeId,
     });
 
     this.broadcast({
-      type: 'operation_processed',
-      operation
+      type: "operation_processed",
+      operation,
     });
 
     // Try to sync immediately if connected
@@ -401,17 +471,21 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
   // moveNode and reorderNodes removed in favor of updateNode
 
-  async updateNode(params: { nodeId: NodeId; parentId?: NodeId | null; orderKey?: string }): Promise<void> {
+  async updateNode(params: {
+    nodeId: NodeId;
+    parentId?: NodeId | null;
+    orderKey?: string;
+  }): Promise<void> {
     await this.ensureInitialized();
 
     const operation = await this.builder.dispatch({
-      type: 'update_node',
-      ...params
+      type: "update_node",
+      ...params,
     });
 
     this.broadcast({
-      type: 'operation_processed',
-      operation
+      type: "operation_processed",
+      operation,
     });
 
     this.trySyncOperationImmediately(operation.id);
@@ -421,7 +495,7 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     await this.ensureInitialized();
 
     // Backwards-compatible: translate toggleFolder into explicit open/close ops
-    if (typeof open === 'boolean') {
+    if (typeof open === "boolean") {
       if (open) {
         await this.openFolder(folderId);
       } else {
@@ -431,9 +505,9 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     }
 
     // If open is undefined, determine current state and invert it by reading tree
-  const node = await this.builder.bookmarkTree.getNode(folderId);
-  const nodeAsFolder = node as unknown as { isOpen?: boolean } | undefined;
-  const currentlyOpen = nodeAsFolder && nodeAsFolder.isOpen === true;
+    const node = await this.builder.bookmarkTree.getNode(folderId);
+    const nodeAsFolder = node as unknown as { isOpen?: boolean } | undefined;
+    const currentlyOpen = nodeAsFolder && nodeAsFolder.isOpen === true;
     if (currentlyOpen) {
       await this.closeFolder(folderId);
     } else {
@@ -445,25 +519,31 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
   async openFolder(folderId: NodeId): Promise<void> {
     await this.ensureInitialized();
-    const operation = await this.builder.dispatch({ type: 'open_folder', folderId });
+    const operation = await this.builder.dispatch({
+      type: "open_folder",
+      folderId,
+    });
 
-    this.broadcast({ type: 'operation_processed', operation });
+    this.broadcast({ type: "operation_processed", operation });
     this.trySyncOperationImmediately(operation.id);
 
     // Load children when opening
     const folder = await this.builder.bookmarkTree.getNode(folderId);
-    if (folder?.kind === 'folder' && !folder.isLoaded) {
-      this.loadFolderData(folderId).catch(error => {
-        console.error('[SharedWorker] Failed to load folder data:', error);
+    if (folder?.kind === "folder" && !folder.isLoaded) {
+      this.loadFolderData(folderId).catch((error) => {
+        console.error("[SharedWorker] Failed to load folder data:", error);
       });
     }
   }
 
   async closeFolder(folderId: NodeId): Promise<void> {
     await this.ensureInitialized();
-    const operation = await this.builder.dispatch({ type: 'close_folder', folderId });
+    const operation = await this.builder.dispatch({
+      type: "close_folder",
+      folderId,
+    });
 
-    this.broadcast({ type: 'operation_processed', operation });
+    this.broadcast({ type: "operation_processed", operation });
     this.trySyncOperationImmediately(operation.id);
   }
 
@@ -471,13 +551,13 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     await this.ensureInitialized();
 
     const operation = await this.builder.dispatch({
-      type: 'mark_folder_loaded',
-      folderId
+      type: "mark_folder_loaded",
+      folderId,
     });
 
     this.broadcast({
-      type: 'operation_processed',
-      operation
+      type: "operation_processed",
+      operation,
     });
 
     // Try to sync immediately if connected
@@ -492,42 +572,56 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
       // Check if folder is already loaded
       const existingFolder = await this.builder.bookmarkTree.getNode(folderId);
-      if (existingFolder && existingFolder.kind === 'folder' && existingFolder.isLoaded) {
-        console.log(`[SharedWorker] Folder ${folderId} is already loaded, skipping fetch`);
+      if (
+        existingFolder &&
+        existingFolder.kind === "folder" &&
+        existingFolder.isLoaded
+      ) {
+        console.log(
+          `[SharedWorker] Folder ${folderId} is already loaded, skipping fetch`,
+        );
         return;
       }
 
       // Fetch data from server using the real API
-      const { node: nodeData, children } = await ServerAPI.fetchNodeWithChildren(folderId);
+      const { node: nodeData, children } =
+        await ServerAPI.fetchNodeWithChildren(folderId);
 
-      console.log(`[SharedWorker] Received data for folder ${folderId}:`, { nodeData, children });
+      console.log(`[SharedWorker] Received data for folder ${folderId}:`, {
+        nodeData,
+        children,
+      });
 
       // Apply hydrate operation to update the tree
       const operation = await this.builder.dispatch({
-        type: 'hydrate_node',
+        type: "hydrate_node",
         nodeId: folderId,
         nodeData: nodeData as unknown as Record<string, unknown>,
-        children: children as unknown as Record<string, unknown>[]
+        children: children as unknown as Record<string, unknown>[],
       });
 
       // Broadcast the hydrate_node event for immediate UI updates
       this.broadcast({
-        type: 'hydrate_node',
+        type: "hydrate_node",
         nodeId: folderId,
         nodeData: nodeData as TreeNode, // Cast since we know this is safe from ServerAPI
-        children
+        children,
       });
 
       // Also broadcast the operation_processed for consistency
       this.broadcast({
-        type: 'operation_processed',
-        operation
+        type: "operation_processed",
+        operation,
       });
 
-      console.log(`[SharedWorker] Successfully loaded and hydrated folder: ${folderId}`);
-
+      console.log(
+        `[SharedWorker] Successfully loaded and hydrated folder: ${folderId}`,
+      );
     } catch (error) {
-      console.error(`[SharedWorker] Failed to load folder data for ${folderId}:`, error);
+      console.error(
+        `[SharedWorker] Failed to load folder data for ${folderId}:`,
+        error,
+      );
 
       throw error;
     }
@@ -540,51 +634,59 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   private async hydrateRootNode(): Promise<void> {
     await this.ensureInitialized();
 
-    console.log('Called hydrate root node');
+    console.log("Called hydrate root node");
 
     // Prevent duplicate hydration within 1 second
     const now = Date.now();
     if (now - this.lastHydrationTime < 1000) {
-      console.log(`[SharedWorker] Skipping hydration, too recent (${now - this.lastHydrationTime}ms ago)`);
+      console.log(
+        `[SharedWorker] Skipping hydration, too recent (${now - this.lastHydrationTime}ms ago)`,
+      );
       return;
     }
     this.lastHydrationTime = now;
 
     try {
       const rootId = this.builder.bookmarkTree.rootId;
-      console.log(`[SharedWorker] Starting safe baseline+delta hydration for root: ${rootId}`);
+      console.log(
+        `[SharedWorker] Starting safe baseline+delta hydration for root: ${rootId}`,
+      );
 
       // Step 2: Fetch server state to establish new baseline
-      const { node: nodeData, children } = await ServerAPI.fetchNodeWithChildren(rootId);
+      const { node: nodeData, children } =
+        await ServerAPI.fetchNodeWithChildren(rootId);
 
-      console.log(`[SharedWorker] Fetched server baseline with ${children.length} total nodes`);
+      console.log(
+        `[SharedWorker] Fetched server baseline with ${children.length} total nodes`,
+      );
 
       // Step 3: Clear the operation log and rebuild from server baseline + pending operations
       await this.rebuildTreeFromBaseline(rootId, nodeData, children);
 
       // Step 4: Broadcast the completed hydration
       this.broadcast({
-        type: 'hydrate_node',
+        type: "hydrate_node",
         nodeId: rootId,
         nodeData: nodeData as TreeNode,
-        children
+        children,
       });
 
       this.broadcast({
-        type: 'root_hydrated',
+        type: "root_hydrated",
         nodeId: rootId,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       });
 
-      console.log(`[SharedWorker] Successfully completed safe baseline+delta hydration for: ${rootId}`);
-
+      console.log(
+        `[SharedWorker] Successfully completed safe baseline+delta hydration for: ${rootId}`,
+      );
     } catch (error) {
       console.error(`[SharedWorker] Failed to hydrate root node:`, error);
 
       this.broadcast({
-        type: 'root_hydration_failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: Date.now()
+        type: "root_hydration_failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+        timestamp: Date.now(),
       });
 
       throw error;
@@ -598,9 +700,11 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   private async rebuildTreeFromBaseline(
     rootId: NodeId,
     rootNodeData: Partial<TreeNode>,
-    allNodes: TreeNode[]
+    allNodes: TreeNode[],
   ): Promise<void> {
-    console.log(`[SharedWorker] Rebuilding tree from server baseline + pending operations`);
+    console.log(
+      `[SharedWorker] Rebuilding tree from server baseline + pending operations`,
+    );
 
     // Step 1: Create a baseline hydration operation (but don't apply it yet)
     const baselineTimestamp = Date.now();
@@ -608,13 +712,13 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
       id: this.generateId(),
       ts: baselineTimestamp,
       op: {
-        type: 'hydrate_node',
+        type: "hydrate_node",
         nodeId: rootId,
         nodeData: rootNodeData as Record<string, unknown>,
-        children: allNodes as unknown as Record<string, unknown>[]
+        children: allNodes as unknown as Record<string, unknown>[],
       },
       processed: true, // Mark as processed since it represents server state
-      remote: true
+      remote: true,
     };
 
     await this.builder.initialize([baselineOperation], true);
@@ -643,12 +747,13 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
         const node = await this.builder.bookmarkTree.getNode(currentId);
         if (!node) continue;
 
-        if (node.kind === 'folder') {
+        if (node.kind === "folder") {
           // Get children in sorted order and update the folder's children array for serialization
-          const children = await this.builder.bookmarkTree.listChildren(currentId);
+          const children =
+            await this.builder.bookmarkTree.listChildren(currentId);
           const serializedFolder = {
             ...node,
-            children: children.map((c) => c.id)
+            children: children.map((c) => c.id),
           } as TreeNode; // preserves FolderNode shape with updated children
 
           nodes[currentId] = serializedFolder;
@@ -668,16 +773,19 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
       return { rootId, nodes };
     } catch (error) {
-      console.error('Failed to serialize tree:', error);
+      console.error("Failed to serialize tree:", error);
       // Fallback: return just the root
       const root = await this.builder.bookmarkTree.getRoot();
-      return { rootId: this.builder.bookmarkTree.rootId, nodes: { [root.id]: root } };
+      return {
+        rootId: this.builder.bookmarkTree.rootId,
+        nodes: { [root.id]: root },
+      };
     }
   }
 
   async getNode(nodeId: NodeId): Promise<TreeNode | null> {
     await this.ensureInitialized();
-    return await this.builder.bookmarkTree.getNode(nodeId) || null;
+    return (await this.builder.bookmarkTree.getNode(nodeId)) || null;
   }
 
   async getChildren(folderId: NodeId) {
@@ -689,16 +797,24 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   async getOperationLog() {
     try {
       // PersistentTreeOpsBuilder handles loading, but we can access via the builder
-      console.log(`[SharedWorker] Returning ${this.builder.log.length} operations from builder`);
+      console.log(
+        `[SharedWorker] Returning ${this.builder.log.length} operations from builder`,
+      );
       return [...this.builder.log];
     } catch (error) {
-      console.error('[SharedWorker] Failed to get operation log:', error);
+      console.error("[SharedWorker] Failed to get operation log:", error);
       return [];
     }
   }
 
-  async appendOperation(operation: Parameters<SharedWorkerAPI['appendOperation']>[0]) {
-    console.log('[SharedWorker] Appending operation (system/sync use only):', operation.id, operation.op);
+  async appendOperation(
+    operation: Parameters<SharedWorkerAPI["appendOperation"]>[0],
+  ) {
+    console.log(
+      "[SharedWorker] Appending operation (system/sync use only):",
+      operation.id,
+      operation.op,
+    );
 
     try {
       // Ensure we're initialized
@@ -710,17 +826,20 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
 
       // Use the builder's applyAndPersist method - let the builder handle persistence
       await this.builder.applyAndPersist(operation);
-      console.log('[SharedWorker] Operation applied and persisted by builder');
+      console.log("[SharedWorker] Operation applied and persisted by builder");
 
       // Broadcast to all tabs (including the originating tab)
       this.broadcast({
-        type: 'operation_processed',
-        operation
+        type: "operation_processed",
+        operation,
       });
 
-      console.log('[SharedWorker] Operation processed and broadcasted:', operation.id);
+      console.log(
+        "[SharedWorker] Operation processed and broadcasted:",
+        operation.id,
+      );
     } catch (error) {
-      console.error('[SharedWorker] Failed to append operation:', error);
+      console.error("[SharedWorker] Failed to append operation:", error);
       throw error;
     }
   }
@@ -728,21 +847,29 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
   // Private Methods
   private broadcast(message: BroadcastMessage): void {
     try {
-      console.log('[SharedWorker] Broadcasting message:', message.type, message);
+      console.log(
+        "[SharedWorker] Broadcasting message:",
+        message.type,
+        message,
+      );
       this.broadcastChannel.postMessage(message);
-      console.log('[SharedWorker] Message broadcast successfully');
+      console.log("[SharedWorker] Message broadcast successfully");
     } catch (error) {
-      console.error('[SharedWorker] Failed to broadcast message:', error);
+      console.error("[SharedWorker] Failed to broadcast message:", error);
     }
   }
 
   private broadcastSSE(message: BroadcastMessage): void {
     try {
-      console.log('[SharedWorker] Broadcasting SSE message:', message.type, message);
+      console.log(
+        "[SharedWorker] Broadcasting SSE message:",
+        message.type,
+        message,
+      );
       this.sseBroadcastChannel.postMessage(message);
-      console.log('[SharedWorker] SSE message broadcast successfully');
+      console.log("[SharedWorker] SSE message broadcast successfully");
     } catch (error) {
-      console.error('[SharedWorker] Failed to broadcast SSE message:', error);
+      console.error("[SharedWorker] Failed to broadcast SSE message:", error);
     }
   }
 
@@ -751,7 +878,11 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const g: any = globalThis as any;
     if (g?.crypto?.randomUUID) return g.crypto.randomUUID();
-    return "id-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+    return (
+      "id-" +
+      Math.random().toString(36).slice(2, 10) +
+      Date.now().toString(36).slice(-4)
+    );
   }
 
   /**
@@ -759,13 +890,16 @@ class BookmarkSharedWorker implements SharedWorkerAPI {
    * This helps track which operations are pending during hydration
    */
   private markOperationSynced(operationId: string): void {
-    const operation = this.builder.log.find(op => op.id === operationId);
+    const operation = this.builder.log.find((op) => op.id === operationId);
     if (operation) {
       operation.processed = true;
       console.log(`[SharedWorker] Marked operation ${operationId} as synced`);
 
       // Update server baseline timestamp to latest synced operation
-      this.serverBaselineTimestamp = Math.max(this.serverBaselineTimestamp, operation.ts);
+      this.serverBaselineTimestamp = Math.max(
+        this.serverBaselineTimestamp,
+        operation.ts,
+      );
     }
   }
 
@@ -790,9 +924,9 @@ const worker = new BookmarkSharedWorker();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const self: any;
 
-self.addEventListener('connect', (event: { ports: MessagePort[] }) => {
+self.addEventListener("connect", (event: { ports: MessagePort[] }) => {
   const port = event.ports[0];
-  console.log('[SharedWorker] New port connection established');
+  console.log("[SharedWorker] New port connection established");
 
   // Expose the API through Comlink
   Comlink.expose(worker, port);
@@ -800,7 +934,7 @@ self.addEventListener('connect', (event: { ports: MessagePort[] }) => {
   port.start();
 });
 
-// Periodic cleanup of inactive connections  
+// Periodic cleanup of inactive connections
 setInterval(() => {
   worker.cleanupConnections();
 }, 60 * 1000); // Check every minute

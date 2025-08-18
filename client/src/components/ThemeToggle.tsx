@@ -11,7 +11,10 @@ export const ThemeToggle: React.FC = () => {
     const stored = localStorage.getItem("theme");
     if (stored === "dark") return true;
     if (stored === "light") return false;
-    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return (
+      window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches
+    );
   });
 
   React.useEffect(() => {
@@ -36,8 +39,14 @@ export const ThemeToggle: React.FC = () => {
       onClick={handleToggle}
       className="relative"
     >
-      <Sun className="size-4 rotate-0 scale-100 transition-transform duration-300 dark:-rotate-90 dark:scale-0" aria-hidden />
-      <Moon className="absolute size-4 rotate-90 scale-0 transition-transform duration-300 dark:rotate-0 dark:scale-100" aria-hidden />
+      <Sun
+        className="size-4 scale-100 rotate-0 transition-transform duration-300 dark:scale-0 dark:-rotate-90"
+        aria-hidden
+      />
+      <Moon
+        className="absolute size-4 scale-0 rotate-90 transition-transform duration-300 dark:scale-100 dark:rotate-0"
+        aria-hidden
+      />
       <span className="sr-only">Toggle theme</span>
     </Button>
   );

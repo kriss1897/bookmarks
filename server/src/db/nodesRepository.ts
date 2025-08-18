@@ -27,12 +27,18 @@ export class NodesRepository {
   async getNodesByParentRows(parentId: string | null, namespace?: string) {
     if (parentId === null) {
       return namespace
-        ? await db.select().from(nodes).where(and(isNull(nodes.parentId), eq(nodes.namespace, namespace)))
+        ? await db
+            .select()
+            .from(nodes)
+            .where(and(isNull(nodes.parentId), eq(nodes.namespace, namespace)))
         : await db.select().from(nodes).where(isNull(nodes.parentId));
     }
 
     return namespace
-      ? await db.select().from(nodes).where(and(eq(nodes.parentId, parentId), eq(nodes.namespace, namespace)))
+      ? await db
+          .select()
+          .from(nodes)
+          .where(and(eq(nodes.parentId, parentId), eq(nodes.namespace, namespace)))
       : await db.select().from(nodes).where(eq(nodes.parentId, parentId));
   }
 

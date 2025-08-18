@@ -2,8 +2,8 @@
  * Hook for managing broadcast channel communication
  */
 
-import { useEffect, useRef, useCallback, useState } from 'react';
-import type { BroadcastMessage } from '../workers/sharedWorkerAPI';
+import { useEffect, useRef, useCallback, useState } from "react";
+import type { BroadcastMessage } from "../workers/sharedWorkerAPI";
 
 interface UseBroadcastChannelReturn {
   lastMessage: BroadcastMessage | null;
@@ -13,24 +13,28 @@ interface UseBroadcastChannelReturn {
 
 export function useBroadcastChannel(
   channelName: string,
-  onMessage?: (message: BroadcastMessage) => void
+  onMessage?: (message: BroadcastMessage) => void,
 ): UseBroadcastChannelReturn {
   const channelRef = useRef<BroadcastChannel | null>(null);
   const [lastMessage, setLastMessage] = useState<BroadcastMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const sendMessage = useCallback((message: BroadcastMessage) => {
-    if (channelRef.current) {
-      try {
-        channelRef.current.postMessage(message);
-        setError(null);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to send message';
-        setError(errorMessage);
-        console.error(`[BroadcastChannel:${channelName}] Send error:`, err);
+  const sendMessage = useCallback(
+    (message: BroadcastMessage) => {
+      if (channelRef.current) {
+        try {
+          channelRef.current.postMessage(message);
+          setError(null);
+        } catch (err) {
+          const errorMessage =
+            err instanceof Error ? err.message : "Failed to send message";
+          setError(errorMessage);
+          console.error(`[BroadcastChannel:${channelName}] Send error:`, err);
+        }
       }
-    }
-  }, [channelName]);
+    },
+    [channelName],
+  );
 
   useEffect(() => {
     try {
@@ -42,24 +46,30 @@ export function useBroadcastChannel(
         const message = event.data;
         setLastMessage(message);
         setError(null);
-        
+
         // Call optional callback
         if (onMessage) {
           onMessage(message);
         }
-        
-        console.log(`[BroadcastChannel:${channelName}] Message received:`, message);
+
+        console.log(
+          `[BroadcastChannel:${channelName}] Message received:`,
+          message,
+        );
       };
 
-      channel.addEventListener('message', handleMessage);
+      channel.addEventListener("message", handleMessage);
 
       return () => {
-        channel.removeEventListener('message', handleMessage);
+        channel.removeEventListener("message", handleMessage);
         channel.close();
         channelRef.current = null;
       };
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to create broadcast channel';
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Failed to create broadcast channel";
       setError(errorMessage);
       console.error(`[BroadcastChannel:${channelName}] Error:`, err);
     }
@@ -68,6 +78,6 @@ export function useBroadcastChannel(
   return {
     lastMessage,
     sendMessage,
-    error
+    error,
   };
 }

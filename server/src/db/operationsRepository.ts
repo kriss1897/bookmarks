@@ -1,7 +1,14 @@
 import { desc, eq, and } from 'drizzle-orm';
 import { db } from './index.js';
 import { operations, treeSnapshots, syncMetadata } from './schema.js';
-import type { Operation, NewOperation, TreeSnapshot, NewTreeSnapshot, SyncMetadata, NewSyncMetadata } from './schema.js';
+import type {
+  Operation,
+  NewOperation,
+  TreeSnapshot,
+  NewTreeSnapshot,
+  SyncMetadata,
+  NewSyncMetadata,
+} from './schema.js';
 
 export class OperationsRepository {
   async createOperation(operationData: NewOperation): Promise<Operation> {
@@ -10,11 +17,7 @@ export class OperationsRepository {
   }
 
   async getOperations(limit: number = 100): Promise<Operation[]> {
-    return await db
-      .select()
-      .from(operations)
-      .orderBy(desc(operations.timestamp))
-      .limit(limit);
+    return await db.select().from(operations).orderBy(desc(operations.timestamp)).limit(limit);
   }
 
   async getOperationsAfter(timestamp: Date): Promise<Operation[]> {
@@ -34,10 +37,7 @@ export class OperationsRepository {
   }
 
   async getOperationById(operationId: string): Promise<Operation | null> {
-    const [op] = await db
-      .select()
-      .from(operations)
-      .where(eq(operations.id, operationId));
+    const [op] = await db.select().from(operations).where(eq(operations.id, operationId));
     return op || null;
   }
 
@@ -64,7 +64,10 @@ export class OperationsRepository {
       .limit(limit);
   }
 
-  async getSyncMetadata(deviceId: string, namespace: string = 'default'): Promise<SyncMetadata | null> {
+  async getSyncMetadata(
+    deviceId: string,
+    namespace: string = 'default',
+  ): Promise<SyncMetadata | null> {
     const [metadata] = await db
       .select()
       .from(syncMetadata)
@@ -72,7 +75,10 @@ export class OperationsRepository {
     return metadata || null;
   }
 
-  async updateSyncMetadata(deviceId: string, data: Partial<NewSyncMetadata> & { namespace?: string }): Promise<SyncMetadata> {
+  async updateSyncMetadata(
+    deviceId: string,
+    data: Partial<NewSyncMetadata> & { namespace?: string },
+  ): Promise<SyncMetadata> {
     const namespace = data.namespace || 'default';
     const existing = await this.getSyncMetadata(deviceId, namespace);
 
@@ -90,7 +96,7 @@ export class OperationsRepository {
           id: `sync-${deviceId}-${Date.now()}`,
           deviceId,
           namespace,
-          ...data
+          ...data,
         })
         .returning();
       return created;

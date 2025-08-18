@@ -9,7 +9,11 @@ export class BookmarkController {
 
   private operationsService?: OperationsService;
 
-  constructor(eventPublisher: EventPublisher, bookmarkService: BookmarkService, operationsService?: OperationsService) {
+  constructor(
+    eventPublisher: EventPublisher,
+    bookmarkService: BookmarkService,
+    operationsService?: OperationsService,
+  ) {
     this.bookmarkService = bookmarkService;
     this.eventPublisher = eventPublisher;
     this.operationsService = operationsService;
@@ -33,11 +37,7 @@ export class BookmarkController {
             isOpen: true,
           };
 
-          const newNode = await this.bookmarkService.createFolder(
-            namespace,
-            nodeData,
-            folderData
-          );
+          const newNode = await this.bookmarkService.createFolder(namespace, nodeData, folderData);
 
           // Record server-originated creation operation if operationsService available
           if (this.operationsService) {
@@ -61,12 +61,22 @@ export class BookmarkController {
         return res.status(404).json({ success: false, message: 'Node not found' });
       }
 
-      res.json({ success: true, data: tree, message: 'Tree retrieved successfully with open folder children' });
+      res.json({
+        success: true,
+        data: tree,
+        message: 'Tree retrieved successfully with open folder children',
+      });
     } catch (error) {
       console.error('Error fetching node tree:', error);
-      res.status(500).json({ success: false, message: 'Internal server error', error: error instanceof Error ? error.message : 'Unknown error' });
+      res
+        .status(500)
+        .json({
+          success: false,
+          message: 'Internal server error',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
     }
-  }
+  };
 }
 
 export default BookmarkController;

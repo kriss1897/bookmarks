@@ -11,7 +11,10 @@ import type { BroadcastMessage } from "@/workers/sharedWorkerAPI";
  */
 export const HeaderEventsIndicator: React.FC = () => {
   const { workerProxy, isConnected } = useSharedWorkerConnection();
-  const [state, setState] = React.useState<SSEConnectionState>({ connected: false, connecting: false });
+  const [state, setState] = React.useState<SSEConnectionState>({
+    connected: false,
+    connecting: false,
+  });
 
   // Get initial SSE state
   React.useEffect(() => {
@@ -21,7 +24,7 @@ export const HeaderEventsIndicator: React.FC = () => {
       try {
         const s = await workerProxy.getSSEState();
         if (mounted) setState(s);
-  } catch {
+      } catch {
         // noop
       }
     })();
@@ -31,8 +34,8 @@ export const HeaderEventsIndicator: React.FC = () => {
   }, [workerProxy, isConnected]);
 
   // Subscribe to SSE state changes
-  useBroadcastChannel('bookmarks-sse', (message: BroadcastMessage) => {
-    if (message.type === 'sse_state_changed') {
+  useBroadcastChannel("bookmarks-sse", (message: BroadcastMessage) => {
+    if (message.type === "sse_state_changed") {
       setState(message.state);
     }
   });
@@ -40,16 +43,35 @@ export const HeaderEventsIndicator: React.FC = () => {
   const title = state.error
     ? `SSE error: ${state.error}`
     : state.connecting
-      ? 'SSE: Connecting…'
+      ? "SSE: Connecting…"
       : state.connected
-        ? 'SSE: Connected'
-        : 'SSE: Disconnected';
+        ? "SSE: Connected"
+        : "SSE: Disconnected";
 
   const { icon, color, spinning } = (() => {
-    if (state.error) return { icon: <TriangleAlert className="size-4" />, color: 'text-yellow-600', spinning: false };
-    if (state.connecting) return { icon: <Loader2 className="size-4" />, color: 'text-blue-600', spinning: true };
-    if (state.connected) return { icon: <Signal className="size-4" />, color: 'text-green-600', spinning: false };
-    return { icon: <WifiOff className="size-4" />, color: 'text-red-600', spinning: false };
+    if (state.error)
+      return {
+        icon: <TriangleAlert className="size-4" />,
+        color: "text-yellow-600",
+        spinning: false,
+      };
+    if (state.connecting)
+      return {
+        icon: <Loader2 className="size-4" />,
+        color: "text-blue-600",
+        spinning: true,
+      };
+    if (state.connected)
+      return {
+        icon: <Signal className="size-4" />,
+        color: "text-green-600",
+        spinning: false,
+      };
+    return {
+      icon: <WifiOff className="size-4" />,
+      color: "text-red-600",
+      spinning: false,
+    };
   })();
 
   return (
@@ -59,9 +81,19 @@ export const HeaderEventsIndicator: React.FC = () => {
       aria-label={title}
       title={title}
       className="relative"
-      onClick={() => {/* reserved for future quick actions */}}
+      onClick={() => {
+        /* reserved for future quick actions */
+      }}
     >
-      <span className={"transition-transform " + (spinning ? "animate-spin" : "") + " " + color} aria-hidden>
+      <span
+        className={
+          "transition-transform " +
+          (spinning ? "animate-spin" : "") +
+          " " +
+          color
+        }
+        aria-hidden
+      >
         {icon}
       </span>
       <span className="sr-only">SSE status</span>

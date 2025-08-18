@@ -3,14 +3,17 @@
  * Handles IndexedDB operations in the SharedWorker
  */
 
-import Dexie, { type Table } from 'dexie';
-import type { BookmarkTreeNode as TreeNode, NodeId } from '../lib/tree';
-import type { OperationEnvelope, TreeOperation } from '../lib/builder/treeBuilder';
+import Dexie, { type Table } from "dexie";
+import type { BookmarkTreeNode as TreeNode, NodeId } from "../lib/tree";
+import type {
+  OperationEnvelope,
+  TreeOperation,
+} from "../lib/builder/treeBuilder";
 
 // Database interfaces
 export interface StoredNode {
   id: NodeId;
-  kind: 'bookmark' | 'folder';
+  kind: "bookmark" | "folder";
   title: string;
   parentId: NodeId | null;
   orderKey?: string;
@@ -26,7 +29,7 @@ export interface StoredOperation {
   ts: number; // operation timestamp
   op: TreeOperation; // the actual operation data
   processedAt: number;
-  status: 'completed' | 'pending' | 'failed';
+  status: "completed" | "pending" | "failed";
   retryCount?: number;
   errorMessage?: string;
 }
@@ -35,19 +38,19 @@ export interface StoredOperation {
 export class BookmarkDatabase extends Dexie {
   // Node storage table
   nodes!: Table<StoredNode, NodeId>;
-  
-  // Operation log table  
+
+  // Operation log table
   operationLog!: Table<StoredOperation, number>;
 
   constructor() {
-    super('BookmarkDatabase');
-    
+    super("BookmarkDatabase");
+
     this.version(1).stores({
       // Nodes table with indexes for efficient querying
-      nodes: 'id, parentId, updatedAt, createdAt, kind',
-      
+      nodes: "id, parentId, updatedAt, createdAt, kind",
+
       // Operation log with auto-incrementing dbId
-      operationLog: '++dbId, id, ts, processedAt, status'
+      operationLog: "++dbId, id, ts, processedAt, status",
     });
   }
 }
@@ -71,30 +74,30 @@ export class DatabaseService {
       title: node.title,
       parentId: node.parentId,
       orderKey: node.orderKey,
-      url: node.kind === 'bookmark' ? node.url : undefined,
-      isOpen: node.kind === 'folder' ? node.isOpen : undefined,
+      url: node.kind === "bookmark" ? node.url : undefined,
+      isOpen: node.kind === "folder" ? node.isOpen : undefined,
       updatedAt: Date.now(),
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
-    
+
     await this.db.nodes.put(storedNode);
   }
 
   async saveNodes(nodes: TreeNode[]): Promise<void> {
     const timestamp = Date.now();
-    const storedNodes: StoredNode[] = nodes.map(node => ({
+    const storedNodes: StoredNode[] = nodes.map((node) => ({
       id: node.id,
       kind: node.kind,
       title: node.title,
       parentId: node.parentId,
       orderKey: node.orderKey,
-      url: node.kind === 'bookmark' ? node.url : undefined,
-      isOpen: node.kind === 'folder' ? node.isOpen : undefined,
+      url: node.kind === "bookmark" ? node.url : undefined,
+      isOpen: node.kind === "folder" ? node.isOpen : undefined,
       updatedAt: timestamp,
-      createdAt: timestamp
+      createdAt: timestamp,
     }));
 
-    await this.db.transaction('rw', this.db.nodes, async () => {
+    await this.db.transaction("rw", this.db.nodes, async () => {
       for (const node of storedNodes) {
         await this.db.nodes.put(node);
       }
@@ -114,48 +117,55 @@ export class DatabaseService {
   }
 
   async getChildren(parentId: NodeId): Promise<StoredNode[]> {
-    return await this.db.nodes
-      .where('parentId')
-      .equals(parentId)
-      .toArray();
+    return await this.db.nodes.where("parentId").equals(parentId).toArray();
   }
 
   // Operation log operations
   async appendOperation(operation: OperationEnvelope): Promise<number> {
-    console.log('[Database] Appending operation to database:', operation.id);
-    
+    console.log("[Database] Appending operation to database:", operation.id);
+
     const storedOperation: StoredOperation = {
       id: operation.id,
       ts: operation.ts,
       op: operation.op,
       processedAt: Date.now(),
-      status: operation.remote ? 'completed' : 'pending', // Mark remote operations as completed, local as pending
-      retryCount: 0
+      status: operation.remote ? "completed" : "pending", // Mark remote operations as completed, local as pending
+      retryCount: 0,
     };
 
     try {
       const dbId = await this.db.operationLog.add(storedOperation);
-      console.log('[Database] Operation saved with dbId:', dbId);
+      console.log("[Database] Operation saved with dbId:", dbId);
       return dbId;
     } catch (error) {
-      console.error('[Database] Failed to append operation:', error);
+      console.error("[Database] Failed to append operation:", error);
       throw error;
     }
   }
 
-  async updateOperationStatus(operationId: string, status: 'completed' | 'pending' | 'failed', errorMessage?: string, retryCount?: number): Promise<void> {
+  async updateOperationStatus(
+    operationId: string,
+    status: "completed" | "pending" | "failed",
+    errorMessage?: string,
+    retryCount?: number,
+  ): Promise<void> {
     try {
       await this.db.operationLog
-        .where('id')
+        .where("id")
         .equals(operationId)
         .modify({
           status,
           errorMessage,
-          retryCount: retryCount !== undefined ? retryCount : undefined
+          retryCount: retryCount !== undefined ? retryCount : undefined,
         });
-      console.log(`[Database] Updated operation ${operationId} status to ${status}`);
+      console.log(
+        `[Database] Updated operation ${operationId} status to ${status}`,
+      );
     } catch (error) {
-      console.error(`[Database] Failed to update operation ${operationId} status:`, error);
+      console.error(
+        `[Database] Failed to update operation ${operationId} status:`,
+        error,
+      );
       throw error;
     }
   }
@@ -163,17 +173,17 @@ export class DatabaseService {
   async getPendingOperations(): Promise<StoredOperation[]> {
     try {
       const pendingOps = await this.db.operationLog
-        .where('status')
-        .equals('pending')
+        .where("status")
+        .equals("pending")
         .toArray();
-      
+
       // Sort by timestamp manually since Dexie collection doesn't support orderBy on filtered results
       pendingOps.sort((a, b) => a.ts - b.ts);
-      
+
       console.log(`[Database] Found ${pendingOps.length} pending operations`);
       return pendingOps;
     } catch (error) {
-      console.error('[Database] Failed to get pending operations:', error);
+      console.error("[Database] Failed to get pending operations:", error);
       return [];
     }
   }
@@ -181,50 +191,56 @@ export class DatabaseService {
   async getFailedOperations(): Promise<StoredOperation[]> {
     try {
       const failedOps = await this.db.operationLog
-        .where('status')
-        .equals('failed')
+        .where("status")
+        .equals("failed")
         .toArray();
-      
+
       // Sort by timestamp manually
       failedOps.sort((a, b) => a.ts - b.ts);
-      
+
       console.log(`[Database] Found ${failedOps.length} failed operations`);
       return failedOps;
     } catch (error) {
-      console.error('[Database] Failed to get failed operations:', error);
+      console.error("[Database] Failed to get failed operations:", error);
       return [];
     }
   }
 
   async loadOperationLog(): Promise<StoredOperation[]> {
-    const operations = await this.db.operationLog
-      .orderBy('ts')
-      .toArray();
-    
-    console.log('[Database] Loaded', operations.length, 'operations from database');
-    
+    const operations = await this.db.operationLog.orderBy("ts").toArray();
+
+    console.log(
+      "[Database] Loaded",
+      operations.length,
+      "operations from database",
+    );
+
     return operations;
   }
 
   async getOperationsSince(timestamp: number): Promise<StoredOperation[]> {
     return await this.db.operationLog
-      .where('processedAt')
+      .where("processedAt")
       .above(timestamp)
       .toArray();
   }
 
   // Database management
   async clear(): Promise<void> {
-    await this.db.transaction('rw', [this.db.nodes, this.db.operationLog], async () => {
-      await this.db.nodes.clear();
-      await this.db.operationLog.clear();
-    });
+    await this.db.transaction(
+      "rw",
+      [this.db.nodes, this.db.operationLog],
+      async () => {
+        await this.db.nodes.clear();
+        await this.db.operationLog.clear();
+      },
+    );
   }
 
   async getStats(): Promise<{ nodeCount: number; operationCount: number }> {
     const [nodeCount, operationCount] = await Promise.all([
       this.db.nodes.count(),
-      this.db.operationLog.count()
+      this.db.operationLog.count(),
     ]);
 
     return { nodeCount, operationCount };
