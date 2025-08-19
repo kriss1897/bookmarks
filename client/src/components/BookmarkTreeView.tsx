@@ -200,36 +200,36 @@ export const BookmarkTreeView: React.FC = () => {
           aria-modal="true"
           aria-label="Create folder dialog"
         >
-          <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-lg">
-            <h3 className="mb-3 text-lg font-semibold">Create Folder</h3>
-            <label
-              className="mb-1 block text-sm text-gray-700"
-              htmlFor="folder-title"
-            >
-              Folder name
-            </label>
-            <input
-              id="folder-title"
-              type="text"
-              value={createFolderModal.title}
-              onChange={(e) =>
-                setCreateFolderModal((prev) => ({
-                  ...prev,
-                  title: e.target.value,
-                }))
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  void handleConfirmCreateFolder();
+          <div className="w-full max-w-sm rounded-lg bg-white dark:bg-slate-800 p-4 shadow-lg border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-gray-100">
+              <h3 className="mb-3 text-lg font-semibold">Create Folder</h3>
+              <label
+                className="mb-1 block text-sm text-gray-700 dark:text-gray-200"
+                htmlFor="folder-title"
+              >
+                Folder name
+              </label>
+              <input
+                id="folder-title"
+                type="text"
+                value={createFolderModal.title}
+                onChange={(e) =>
+                  setCreateFolderModal((prev) => ({
+                    ...prev,
+                    title: e.target.value,
+                  }))
                 }
-                if (e.key === "Escape") {
-                  handleCancelCreateFolder();
-                }
-              }}
-              className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              placeholder="New Folder"
-              autoFocus
-            />
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    void handleConfirmCreateFolder();
+                  }
+                  if (e.key === "Escape") {
+                    handleCancelCreateFolder();
+                  }
+                }}
+                className="w-full rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                placeholder="New Folder"
+                autoFocus
+              />
             <div className="mt-4 flex justify-end gap-2">
               <Button
                 variant="outline"
@@ -259,12 +259,12 @@ export const BookmarkTreeView: React.FC = () => {
           aria-modal="true"
           aria-label="Create bookmark dialog"
         >
-          <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-lg">
+          <div className="w-full max-w-sm rounded-lg bg-white dark:bg-slate-800 p-4 shadow-lg border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-gray-100">
             <h3 className="mb-3 text-lg font-semibold">Create Bookmark</h3>
             <div className="space-y-3">
               <div>
                 <label
-                  className="mb-1 block text-sm text-gray-700"
+                  className="mb-1 block text-sm text-gray-700 dark:text-gray-200"
                   htmlFor="bookmark-title"
                 >
                   Title
@@ -287,14 +287,14 @@ export const BookmarkTreeView: React.FC = () => {
                       handleCancelCreateBookmark();
                     }
                   }}
-                  className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   placeholder="My link"
                   autoFocus
                 />
               </div>
               <div>
                 <label
-                  className="mb-1 block text-sm text-gray-700"
+                  className="mb-1 block text-sm text-gray-700 dark:text-gray-200"
                   htmlFor="bookmark-url"
                 >
                   URL
@@ -317,7 +317,7 @@ export const BookmarkTreeView: React.FC = () => {
                       handleCancelCreateBookmark();
                     }
                   }}
-                  className="w-full rounded border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   placeholder="https://example.com"
                 />
               </div>

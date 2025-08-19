@@ -3,7 +3,7 @@
  * Supports drag-and-drop, menu actions, and custom data sources
  */
 
-import React, { createContext, useContext } from "react";
+import React, { createContext, useContext, useRef, useEffect, useLayoutEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { isFolder, type BookmarkTreeNode } from "@/lib/tree/BookmarkTree";
 import type { TreeOperation } from "@/lib/builder/treeBuilder";
@@ -174,6 +174,7 @@ const FolderNodeComponent: React.FC<{
           </button>
           <div className="grow"></div>
           <ItemMenu
+            isFolder={true}
             onMenu={(action) =>
               onMenuAction({ action, nodeId: node.id, parentId, index: idx })
             }
@@ -262,6 +263,7 @@ const BookmarkNodeComponent: React.FC<{
             </div>
           </a>
           <ItemMenu
+            isFolder={false}
             onMenu={(action) =>
               onMenuAction({ action, nodeId: node.id, parentId, index: idx })
             }
@@ -761,13 +763,48 @@ const DragHandle: React.FC = () => {
   );
 };
 
-const ItemMenu: React.FC<{ onMenu: (action: MenuAction) => void }> = ({
+const ItemMenu: React.FC<{
+  onMenu: (action: MenuAction) => void;
+  isFolder?: boolean;
+}> = ({
   onMenu,
+  isFolder = true,
 }) => {
   const [open, setOpen] = React.useState(false);
+  const [openLeft, setOpenLeft] = React.useState(false);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // When menu opens, measure available space and decide to flip to the left
+  useLayoutEffect(() => {
+    if (!open) return;
+    const btn = btnRef.current;
+    const menu = menuRef.current;
+    if (!btn || !menu) return;
+    const btnRect = btn.getBoundingClientRect();
+    const menuWidth = menu.offsetWidth || 160; // fallback width
+    const padding = 8; // keep a small gap from the window edge
+    const willOverflowRight = btnRect.right + menuWidth + padding > window.innerWidth;
+    setOpenLeft(willOverflowRight);
+  }, [open]);
+
+  // Close on outside click
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      const target = e.target as Node | null;
+      if (!open) return;
+      if (menuRef.current && menuRef.current.contains(target)) return;
+      if (btnRef.current && btnRef.current.contains(target)) return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
   return (
     <div className="relative">
       <button
+        ref={btnRef}
         className="hover:bg-accent inline-flex size-8 items-center justify-center rounded"
         aria-label="Open item menu"
         tabIndex={0}
@@ -780,26 +817,34 @@ const ItemMenu: React.FC<{ onMenu: (action: MenuAction) => void }> = ({
       </button>
       {open && (
         <div
-          className="bg-background absolute z-10 mt-1 w-40 rounded-md border p-1 text-sm shadow"
+          ref={menuRef}
+          className={
+            "bg-background absolute z-10 mt-1 w-40 rounded-md border p-1 text-sm shadow"
+          }
+          style={openLeft ? { right: 0 } : { left: 0 }}
           role="menu"
           aria-label="Item actions"
         >
-          <MenuItem
-            icon={<Plus className="size-3.5" />}
-            label="Create bookmark"
-            onClick={() => {
-              onMenu("createBookmark");
-              setOpen(false);
-            }}
-          />
-          <MenuItem
-            icon={<FolderPlus className="size-3.5" />}
-            label="Create folder"
-            onClick={() => {
-              onMenu("createFolder");
-              setOpen(false);
-            }}
-          />
+          {isFolder && (
+            <>
+              <MenuItem
+                icon={<Plus className="size-3.5" />}
+                label="Create bookmark"
+                onClick={() => {
+                  onMenu("createBookmark");
+                  setOpen(false);
+                }}
+              />
+              <MenuItem
+                icon={<FolderPlus className="size-3.5" />}
+                label="Create folder"
+                onClick={() => {
+                  onMenu("createFolder");
+                  setOpen(false);
+                }}
+              />
+            </>
+          )}
           <MenuItem
             icon={<ArrowUp className="size-3.5" />}
             label="Move up"
